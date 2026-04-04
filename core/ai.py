@@ -1,7 +1,9 @@
-"""AI модуль — Claude Sonnet + парсинг дій."""
+"""AI модуль — Claude Sonnet + Vision + парсинг дій."""
 import re
 import json
+import base64
 import logging
+from pathlib import Path
 import anthropic
 from core.config import ANTHROPIC_KEY, CLAUDE_MODEL, CLAUDE_MAX_TOKENS
 from core.prompt import build_system
@@ -12,14 +14,13 @@ log = logging.getLogger("core.ai")
 client = anthropic.Anthropic(
     api_key=ANTHROPIC_KEY,
     max_retries=2,
-    timeout=60.0
+    timeout=120.0
 )
 
 MAX_HISTORY_TOKENS = 6000
 
 
 def _optimize_history(history: list) -> list:
-    """Обрізає по токенах (1 токен ≈ 4 символи)."""
     result, total = [], 0
     for msg in reversed(history):
         size = len(str(msg.get("content", ""))) // 4
@@ -29,19 +30,43 @@ def _optimize_history(history: list) -> list:
         total += size
     if not result and history:
         result = history[-2:]
-    log.debug(f"History: {len(result)} повідомлень, ~{total} токенів")
     return result
 
 
-def _parse_action(text: str) -> dict | None:
-    match = re.search(r"```json\s*(\{.*?\})\s*```", text, re.DOTALL)
-    if not match:
-        return None
+def _encode_image(image_path: str) -> tuple[str, str]:
+    path = Path(image_path)
     try:
-        return json.loads(match.group(1))
-    except json.JSONDecodeError:
-        log.warning("Не вдалось розпарсити action JSON")
-        return None
+        from PIL import Image
+        import io
+        img = Image.open(path)
+        if img.mode in ("RGBA", "P"):
+            img = img.convert("RGB")
+        img.thumbnail((1568, 1568), Image.LANCZOS)
+        buf = io.BytesIO()
+        quality = 82
+        img.save(buf, format="JPEG", quality=quality, optimize=True)
+        while buf.tell() > 1.5 * 1024 * 1024 and quality > 30:
+            quality -= 15
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG", quality=quality, optimize=True)
+        log.info(f"Фото {path.name}: {buf.tell()/1024:.0f}KB якість {quality}")
+        return base64.standard_b64encode(buf.getvalue()).decode("utf-8"), "image/jpeg"
+    except ImportError:
+        raw = path.read_bytes()
+        suffix = path.suffix.lower()
+        media_types = {".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+                       ".png": "image/png", ".webp": "image/webp"}
+        return base64.standard_b64encode(raw).decode("utf-8"), media_types.get(suffix, "image/jpeg")
+
+
+def _parse_multi_actions(text: str) -> list[dict]:
+    results = []
+    for match in re.finditer(r"```json\s*(\{.*?\})\s*```", text, re.DOTALL):
+        try:
+            results.append(json.loads(match.group(1)))
+        except json.JSONDecodeError:
+            pass
+    return results
 
 
 def _execute_action(action: dict):
@@ -71,14 +96,43 @@ def _execute_action(action: dict):
 
 
 def _clean_reply(text: str) -> str:
-    """Прибираємо JSON-блок перед відправкою юзеру."""
     return re.sub(r"```json\s*\{.*?\}\s*```", "", text, flags=re.DOTALL).strip()
 
 
-async def chat(user_id: int, user_message: str) -> str:
+async def chat(user_id: int, user_message: str,
+               image_paths: list = None, image_path: str = None) -> str:
+    # Сумісність зі старим single image_path
+    if image_path and not image_paths:
+        image_paths = [image_path]
+    image_paths = image_paths or []
+
     history = memory.get_session(user_id)
     optimized = _optimize_history(history)
-    optimized.append({"role": "user", "content": user_message})
+
+    # Будуємо контент — спочатку всі фото, потім текст
+    content = []
+
+    for i, path in enumerate(image_paths):
+        try:
+            data, media_type = _encode_image(path)
+            content.append({
+                "type": "image",
+                "source": {"type": "base64", "media_type": media_type, "data": data}
+            })
+            if len(image_paths) > 1:
+                content.append({
+                    "type": "text",
+                    "text": f"[Фото {i+1} з {len(image_paths)}]"
+                })
+        except Exception as e:
+            log.error(f"Помилка кодування фото {path}: {e}")
+
+    # Текст запиту
+    if image_paths and not user_message:
+        user_message = f"Що бачиш на {'цих фото' if len(image_paths) > 1 else 'фото'}? Розпізнай і додай в інвентар."
+    content.append({"type": "text", "text": user_message})
+
+    optimized.append({"role": "user", "content": content})
 
     try:
         response = client.messages.create(
@@ -90,7 +144,8 @@ async def chat(user_id: int, user_message: str) -> str:
         reply = response.content[0].text
         u = response.usage
         log.info(
-            f"[{user_id}] in={u.input_tokens} out={u.output_tokens} "
+            f"[{user_id}] фото={len(image_paths)} "
+            f"in={u.input_tokens} out={u.output_tokens} "
             f"cache_read={getattr(u,'cache_read_input_tokens',0)} "
             f"cache_created={getattr(u,'cache_creation_input_tokens',0)}"
         )
@@ -101,11 +156,11 @@ async def chat(user_id: int, user_message: str) -> str:
         log.error(f"AI помилка: {e}")
         return "Технічна помилка. Спробуй ще раз."
 
-    action = _parse_action(reply)
-    if action:
+    for action in _parse_multi_actions(reply):
         _execute_action(action)
 
-    history.append({"role": "user", "content": user_message})
+    history_msg = f"{'[' + str(len(image_paths)) + ' фото] ' if image_paths else ''}{user_message}".strip()
+    history.append({"role": "user", "content": history_msg})
     history.append({"role": "assistant", "content": reply})
     memory.save_session(user_id, history)
 

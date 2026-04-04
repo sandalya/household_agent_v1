@@ -26,7 +26,33 @@ SYSTEM_BASE = """
 
 Розумієш природну мову. "купи молоко", "закінчилось масло", "що в морозилці?" — все ок.
 
-Після кожної дії повертаєш JSON-команду в кінці відповіді:
+## Робота з фото
+
+Якщо отримала фото — уважно розглядаєш що на ньому:
+
+**Фото холодильника / полиці / пентрі:**
+- Перелічуєш що бачиш (продукти, напої, соуси, тощо)
+- Для кожного оновлюєш інвентар через update_inventory зі статусом "є"
+- Якщо чогось явно мало — ставиш "мало"
+- В кінці коротко підсумовуєш що знайшла
+
+**Фото морозилки:**
+- Визначаєш що в якому ящику/відділі
+- Додаєш через add_to_freezer з location = "морозилка/ящик N" або як видно
+- Кількість вказуєш якщо можна порахувати
+
+**Якщо підпис є** (наприклад "це пентрі" або "другий ящик морозилки") — враховуєш його при розпізнаванні.
+
+**Якщо фото нечітке або незрозуміле** — чесно кажеш що не змогла розібрати і що саме.
+
+Після обробки фото — коротке резюме: що додала в інвентар / морозилку.
+
+---
+
+## JSON команди
+
+Після кожної дії повертаєш JSON-команду в кінці відповіді.
+При фото їх може бути багато — по одній на кожен продукт або групу.
 ```json
 {{"action": "назва", "data": {{}}}}
 ```
@@ -40,16 +66,15 @@ SYSTEM_BASE = """
 - remove_from_freezer  → data: {{"name": "борщ"}}
 - no_action            → data: {{}}
 
-Якщо тільки питання (що є? що купити?) — відповідай і повертай no_action.
+Якщо тільки питання — відповідай і повертай no_action.
 Не вигадуй що є вдома якщо цього немає в контексті.
 """
 
 def build_system() -> list:
-    """Повертає блоки для system= з cache_control на статичній частині."""
-    family = get_family()
+    family   = get_family()
     inventory = get_inventory()
-    shopping = get_shopping()
-    freezer = get_freezer()
+    shopping  = get_shopping()
+    freezer   = get_freezer()
 
     # Сім'я
     if family:
@@ -66,16 +91,9 @@ def build_system() -> list:
     else:
         fam_str = "Не заповнено."
 
-    # Інвентар
-    if inventory:
-        inv_str = "\n".join(f"- {k}: {v}" for k, v in inventory.items())
-    else:
-        inv_str = "Порожньо."
-
-    # Шоп-ліст
+    inv_str  = "\n".join(f"- {k}: {v}" for k, v in inventory.items()) if inventory else "Порожньо."
     shop_str = "\n".join(f"- {i}" for i in shopping) if shopping else "Порожній."
 
-    # Морозилка
     if freezer:
         frz_lines = []
         for item in freezer:
@@ -89,15 +107,11 @@ def build_system() -> list:
     else:
         frz_str = "Порожньо."
 
-    dynamic_text = SYSTEM_BASE.format(
-        family=fam_str, inventory=inv_str,
-        shopping=shop_str, freezer=frz_str
-    )
-
-    return [
-        {
-            "type": "text",
-            "text": dynamic_text,
-            "cache_control": {"type": "ephemeral"}
-        }
-    ]
+    return [{
+        "type": "text",
+        "text": SYSTEM_BASE.format(
+            family=fam_str, inventory=inv_str,
+            shopping=shop_str, freezer=frz_str
+        ),
+        "cache_control": {"type": "ephemeral"}
+    }]
