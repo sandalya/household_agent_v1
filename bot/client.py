@@ -12,6 +12,7 @@ from telegram.ext import (
 from core.config import TELEGRAM_TOKEN, OWNER_CHAT_ID, ADMIN_IDS
 from core import memory
 from core.ai import chat
+from core import voice
 
 log = logging.getLogger("bot.client")
 
@@ -201,6 +202,26 @@ async def handle_document(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await _buffer(user_id, update, ctx, text=caption, image_path=tmp_path)
 
 
+async def handle_voice(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if not is_authorized(user_id):
+        return
+    import tempfile, os
+    v = update.message.voice
+    file = await ctx.bot.get_file(v.file_id)
+    tmp_path = os.path.join(tempfile.gettempdir(), f"meg_voice_{user_id}_{v.file_unique_id}.ogg")
+    await file.download_to_drive(tmp_path)
+    log.info(f"Голосове завантажено: {tmp_path}")
+    await update.message.reply_text("🎙️ Слухаю...")
+    text = voice.transcribe(tmp_path)
+    if not text:
+        await update.message.reply_text("Не розібрала. Спробуй ще раз або напиши текстом.")
+        return
+    log.info(f"Голос → текст: {text}")
+    await update.message.reply_text(f'🎙️ _"{text}"_', parse_mode='Markdown')
+    await _buffer(user_id, update, ctx, text=text)
+
+
 async def _process(update: Update, user_id: int,
                    message: str, image_paths: list = None):
     if not message and not image_paths:
@@ -230,4 +251,5 @@ def setup_handlers(app: Application):
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.Document.IMAGE, handle_document))
+    app.add_handler(MessageHandler(filters.VOICE, handle_voice))
     log.info("Handlers налаштовано")
