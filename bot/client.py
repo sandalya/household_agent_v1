@@ -114,19 +114,55 @@ async def cmd_freezer(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         for key, group in groups.items():
             if len(group) == 1:
                 i = group[0]
-                qty   = f" — {i['qty']} {i.get('unit','шт')}" if i.get("qty") else ""
+                i = group[0]
+                def _d(qty, unit):
+                    u = unit.lower().strip()
+                    try: q = int(qty)
+                    except: return f"{qty} {unit}"
+                    forms = {"малий":("малий","малих","малих"),"великий":("великий","великих","великих"),"пакет":("пакет","пакети","пакетів"),"упаковка":("упаковка","упаковки","упаковок"),"шт":("шт","шт","шт")}
+                    if u in forms:
+                        if q%10==1 and q%100!=11: f=forms[u][0]
+                        elif 2<=q%10<=4 and not(12<=q%100<=14): f=forms[u][1]
+                        else: f=forms[u][2]
+                        return f"{qty} {f}"
+                    return f"{qty} {unit}"
+                qty = f" — {_d(i['qty'], i.get('unit','шт'))}" if i.get("qty") else ""
                 added = f" _(від {i['added']})_" if i.get("added") and i['added'] != "?" else ""
                 result.append(f"  • {i['name']}{qty}{added}")
             else:
                 # кілька записів з однаковою назвою — групуємо
                 name = group[0]["name"]
+                def decline(qty, unit):
+                    u = unit.lower().strip()
+                    try: q = int(qty)
+                    except: return f"{qty} {unit}"
+                    forms = {
+                        "малий": ("малий", "малих", "малих"),
+                        "великий": ("великий", "великих", "великих"),
+                        "пакет": ("пакет", "пакети", "пакетів"),
+                        "упаковка": ("упаковка", "упаковки", "упаковок"),
+                        "шт": ("шт", "шт", "шт"),
+                    }
+                    if u in forms:
+                        if q % 10 == 1 and q % 100 != 11: f = forms[u][0]
+                        elif 2 <= q % 10 <= 4 and not (12 <= q % 100 <= 14): f = forms[u][1]
+                        else: f = forms[u][2]
+                        return f"{qty} {f}"
+                    return f"{qty} {unit}"
                 parts = []
                 for i in group:
                     if i.get("qty"):
-                        parts.append(f"{i['qty']} {i.get('unit','шт')}")
+                        parts.append(decline(i["qty"], i.get("unit", "шт")))
                 # дата — беремо спільну якщо однакова, інакше пропускаємо
-                dates = list({i["added"] for i in group if i.get("added") and i["added"] != "?"})
-                added = f" _(від {dates[0]})_" if len(dates) == 1 else ""
+                from datetime import datetime
+                def parse_date(d):
+                    for fmt in ("%d.%m.%y", "%d.%m.%Y"):
+                        try: return datetime.strptime(d, fmt)
+                        except: pass
+                    return datetime.max
+                dates = [i["added"] for i in group if i.get("added") and i["added"] != "?"]
+                oldest = min(dates, key=parse_date) if dates else None
+                added = f" _(від {oldest})_" if oldest else ""
                 qty_str = " + ".join(parts) if parts else ""
                 result.append(f"  • {name} — {qty_str}{added}" if qty_str else f"  • {name}{added}")
         return result

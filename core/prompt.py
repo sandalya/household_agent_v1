@@ -128,7 +128,7 @@ SYSTEM_BASE = """
 - clear_shopping       → data: {{}}
 - update_inventory     → data: {{"item": "масло", "status": "нема"}}  (є / мало / нема)
 - add_to_freezer       → data: {{"name": "борщ", "location": "ящик 3", "qty": 6, "unit": "великий", "added": "28.12.25"}}
-- remove_from_freezer  → data: {{"name": "борщ"}}
+- remove_from_freezer  → data: {{"name": "борщ", "qty": 2}}  (qty — скільки з'їли; якщо не вказано — видаляє повністю)
 - save_cooking_style   → data: {{"tip": "цибулю пасеруємо на вершковому маслі"}}
 - save_recipe          → data: {{"name": "борщ", "ingredients": ["буряк", "капуста", "картопля"], "steps": "...", "tags": ["суп", "заготовка"]}}
 - remove_recipe        → data: {{"name": "борщ"}}

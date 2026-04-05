@@ -70,7 +70,7 @@ def get_freezer() -> list:
     return _load("freezer.json", [])
 
 def add_to_freezer(name: str, location: str, qty=None, unit=None):
-    freezer = [i for i in get_freezer() if i["name"].lower() != name.strip().lower()]
+    freezer = get_freezer()
     entry = {"name": name.strip(), "location": location.strip(),
              "added": datetime.now().strftime("%d.%m.%Y")}
     if qty is not None:
@@ -80,9 +80,28 @@ def add_to_freezer(name: str, location: str, qty=None, unit=None):
     freezer.append(entry)
     _save("freezer.json", freezer)
 
-def remove_from_freezer(name: str):
-    freezer = [i for i in get_freezer() if i["name"].lower() != name.strip().lower()]
-    _save("freezer.json", freezer)
+def remove_from_freezer(name: str, qty=None):
+    freezer = get_freezer()
+    result = []
+    for item in freezer:
+        if item["name"].lower() != name.strip().lower():
+            result.append(item)
+            continue
+        # знайшли потрібний запис
+        if qty is None:
+            # видаляємо повністю
+            continue
+        try:
+            current = int(item.get("qty", 1))
+            remaining = current - int(qty)
+            if remaining > 0:
+                item["qty"] = remaining
+                result.append(item)
+            # якщо remaining <= 0 — не додаємо (видалено)
+        except (ValueError, TypeError):
+            # qty не числове — видаляємо повністю
+            continue
+    _save("freezer.json", result)
 
 
 # ── Профілі сім'ї ─────────────────────────────────────────────────────────────

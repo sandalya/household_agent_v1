@@ -95,7 +95,7 @@ def _execute_action(action: dict):
             unit=data.get("unit"),
         )
     elif name == "remove_from_freezer":
-        memory.remove_from_freezer(data.get("name", ""))
+        memory.remove_from_freezer(data.get("name", ""), data.get("qty"))
 
     # ── Кулінарний мозок ──────────────────────────────────────────────────────
     elif name == "save_cooking_style":
