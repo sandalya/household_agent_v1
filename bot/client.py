@@ -155,6 +155,23 @@ async def cmd_inventory(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         lines.append(f"{emoji.get(status,'•')} {item} — {status}")
     await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
+async def cmd_recipes(update, ctx):
+    if not is_authorized(update.effective_user.id):
+        return
+    data = kitchen.get_recipes()
+    recipes = data.get('recipes', [])
+    if not recipes:
+        await update.message.reply_text('Рецептів ще немає. Скидай посилання або фото рецепту — збережу.')
+        return
+    lines = ["\U0001f4d6 *Збережені рецепти:*\n"]
+    for i, r in enumerate(recipes, 1):
+        tags = ', '.join(r['tags']) if r.get('tags') else ''
+        tags_str = f' _{tags}_' if tags else ''
+        img = ' 📷' if r.get('image') else ''
+        lines.append(f"{i}. *{r['name']}*{img}{tags_str}")
+    await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+
+
 async def cmd_clear(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not is_authorized(update.effective_user.id):
         return
@@ -284,11 +301,22 @@ async def _process(update: Update, user_id: int,
 
 # ── Setup ─────────────────────────────────────────────────────────────────────
 
+async def post_init(app):
+    await app.bot.set_my_commands([
+        ("list",      "🛒 Шоп-ліст"),
+        ("freezer",   "❄️ Морозилка і пентрі"),
+        ("inventory", "🏠 Що є вдома"),
+        ("recipes",   "📖 Збережені рецепти"),
+        ("clear",     "🗑 Очистити шоп-ліст"),
+        ("reset",     "🔄 Скинути сесію"),
+    ])
+
 def setup_handlers(app: Application):
     app.add_handler(CommandHandler("start",     cmd_start))
     app.add_handler(CommandHandler("list",      cmd_list))
     app.add_handler(CommandHandler("freezer",   cmd_freezer))
     app.add_handler(CommandHandler("inventory", cmd_inventory))
+    app.add_handler(CommandHandler("recipes",   cmd_recipes))
     app.add_handler(CommandHandler("clear",     cmd_clear))
     app.add_handler(CommandHandler("reset",     cmd_reset))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))

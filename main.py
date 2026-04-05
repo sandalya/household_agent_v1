@@ -33,12 +33,14 @@ def main():
 
     log.info("Household Agent стартує...")
 
+    from bot.client import post_init
     app = (
         Application.builder()
         .token(TELEGRAM_TOKEN)
         .connect_timeout(30)
         .read_timeout(30)
         .write_timeout(30)
+        .post_init(post_init)
         .build()
     )
 
