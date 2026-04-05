@@ -8,6 +8,7 @@ import anthropic
 from core.config import ANTHROPIC_KEY, CLAUDE_MODEL, CLAUDE_MAX_TOKENS
 from core.prompt import build_system
 from core import memory
+from core import kitchen
 
 log = logging.getLogger("core.ai")
 
@@ -72,14 +73,20 @@ def _parse_multi_actions(text: str) -> list[dict]:
 def _execute_action(action: dict):
     name = action.get("action")
     data = action.get("data", {})
+
+    # ── Шоп-ліст ──────────────────────────────────────────────────────────────
     if name == "add_to_shopping":
         memory.add_to_shopping(data.get("items", []))
     elif name == "remove_from_shopping":
         memory.remove_from_shopping(data.get("items", []))
     elif name == "clear_shopping":
         memory.clear_shopping()
+
+    # ── Інвентар ──────────────────────────────────────────────────────────────
     elif name == "update_inventory":
         memory.update_inventory(data.get("item", ""), data.get("status", "є"))
+
+    # ── Морозилка ─────────────────────────────────────────────────────────────
     elif name == "add_to_freezer":
         memory.add_to_freezer(
             name=data.get("name", ""),
@@ -89,6 +96,20 @@ def _execute_action(action: dict):
         )
     elif name == "remove_from_freezer":
         memory.remove_from_freezer(data.get("name", ""))
+
+    # ── Кулінарний мозок ──────────────────────────────────────────────────────
+    elif name == "save_cooking_style":
+        kitchen.add_cooking_style(data.get("tip", ""))
+    elif name == "save_recipe":
+        kitchen.add_recipe(
+            name=data.get("name", ""),
+            ingredients=data.get("ingredients", []),
+            steps=data.get("steps", ""),
+            tags=data.get("tags", []),
+        )
+    elif name == "remove_recipe":
+        kitchen.remove_recipe(data.get("name", ""))
+
     elif name == "no_action":
         pass
     else:
@@ -101,7 +122,6 @@ def _clean_reply(text: str) -> str:
 
 async def chat(user_id: int, user_message: str,
                image_paths: list = None, image_path: str = None) -> str:
-    # Сумісність зі старим single image_path
     if image_path and not image_paths:
         image_paths = [image_path]
     image_paths = image_paths or []
@@ -109,9 +129,7 @@ async def chat(user_id: int, user_message: str,
     history = memory.get_session(user_id)
     optimized = _optimize_history(history)
 
-    # Будуємо контент — спочатку всі фото, потім текст
     content = []
-
     for i, path in enumerate(image_paths):
         try:
             data, media_type = _encode_image(path)
@@ -127,7 +145,6 @@ async def chat(user_id: int, user_message: str,
         except Exception as e:
             log.error(f"Помилка кодування фото {path}: {e}")
 
-    # Текст запиту
     if image_paths and not user_message:
         user_message = f"Що бачиш на {'цих фото' if len(image_paths) > 1 else 'фото'}? Розпізнай і додай в інвентар."
     content.append({"type": "text", "text": user_message})

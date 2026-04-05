@@ -81,16 +81,58 @@ async def cmd_freezer(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not items:
         await update.message.reply_text("Морозилка і пентрі порожні.")
         return
+
+    # фільтр по ящику: /freezer 2
+    filter_loc = None
+    if ctx.args:
+        arg = ctx.args[0].strip()
+        filter_loc = f"ящик {arg}" if arg.isdigit() else arg.lower()
+
+    if filter_loc:
+        items = [i for i in items if i.get("location", "").lower() == filter_loc]
+        if not items:
+            await update.message.reply_text(f"В {filter_loc} нічого не знайдено.")
+            return
+
     by_loc: dict[str, list] = {}
     for item in items:
         by_loc.setdefault(item.get("location", "невідомо"), []).append(item)
-    lines = ["❄️ *Морозилка і пентрі:*\n"]
-    for loc, loc_items in sorted(by_loc.items()):
-        lines.append(f"*{loc}*")
+
+    def _group_items(loc_items):
+        """Групує однакові назви в одному ящику в один рядок."""
+        groups = {}
         for i in loc_items:
-            qty   = f" — {i['qty']} {i.get('unit','шт')}" if i.get("qty") else ""
-            added = f" _(від {i['added']})_" if i.get("added") else ""
-            lines.append(f"  • {i['name']}{qty}{added}")
+            key = i["name"].lower().strip()
+            groups.setdefault(key, []).append(i)
+        result = []
+        for key, group in groups.items():
+            if len(group) == 1:
+                i = group[0]
+                qty   = f" — {i['qty']} {i.get('unit','шт')}" if i.get("qty") else ""
+                added = f" _(від {i['added']})_" if i.get("added") and i['added'] != "?" else ""
+                result.append(f"  • {i['name']}{qty}{added}")
+            else:
+                # кілька записів з однаковою назвою — групуємо
+                name = group[0]["name"]
+                parts = []
+                for i in group:
+                    if i.get("qty"):
+                        parts.append(f"{i['qty']} {i.get('unit','шт')}")
+                # дата — беремо спільну якщо однакова, інакше пропускаємо
+                dates = list({i["added"] for i in group if i.get("added") and i["added"] != "?"})
+                added = f" _(від {dates[0]})_" if len(dates) == 1 else ""
+                qty_str = " + ".join(parts) if parts else ""
+                result.append(f"  • {name} — {qty_str}{added}" if qty_str else f"  • {name}{added}")
+        return result
+
+    total = len(items)
+    header = f"❄️ *{filter_loc.capitalize() if filter_loc else 'Морозилка і пентрі'} ({total} позицій):*\n"
+    lines = [header]
+    for loc, loc_items in sorted(by_loc.items(), key=lambda x: (
+        int(x[0].split()[-1]) if x[0].split()[-1].isdigit() else 99
+    )):
+        lines.append(f"📦 *{loc}*")
+        lines.extend(_group_items(loc_items))
         lines.append("")
     await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
