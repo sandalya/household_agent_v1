@@ -32,7 +32,8 @@
     │   ├── ai.py              # chat() — Claude API, vision, парсинг JSON-команд
     │   ├── kitchen.py         # рецепти, кулінарні підходи, превью
     │   ├── voice.py           # транскрибація голосу через faster-whisper
-    │   └── recipe_fetcher.py  # завантаження рецептів по URL
+    │   ├── recipe_fetcher.py  # завантаження рецептів по URL
+    │   └── metro.py           # Metro агент — пошук товарів, кошик
     ├── bot/
     │   └── client.py          # Telegram handlers, буфер 3 сек, grouping фото
     ├── data/
@@ -42,6 +43,7 @@
     │   ├── shopping_list.json # шоп-ліст
     │   ├── recipes.json       # рецепти і кулінарні підходи
     │   ├── recipe_images/     # превью рецептів
+    │   ├── metro_config.json  # токен і налаштування Metro
     │   └── sessions.json      # історія розмов по user_id
     ├── logs/
     │   └── bot.log
@@ -103,19 +105,45 @@
 * **Souper Cubes** — збережено в cooking_style, Мег знає що малий/великий = кубики
 * `meg-git` виправлено як функція з аргументом
 
+### Фаза 3 ✅
+* `core/metro.py` — повний Metro клієнт через неофіційний API (stores-api.zakaz.ua)
+* Три магазини Metro Київ: Позняки (default), Теремки, Троєщина
+* Авторизація через cookie `__Host-zakaz-sid` (береться з браузера один раз)
+* Збереження токена в `data/metro_config.json`
+* `search_product` — пошук товарів по запиту (per_page=5)
+* `pick_best_product` — Claude вибирає найкращий варіант з кандидатів
+* `_parse_quantity` — парсинг кількості: "морква 6 шт" → 0.6кг, "яйця 14шт" → упаковка
+* `fill_cart_from_order` — очищає кошик (operation=set amount=0) і заповнює новими товарами
+* `/metro` команда в Telegram — шукає весь шоп-ліст і автоматично заповнює кошик
+* Підтримка знижок — показує стару ціну і відсоток знижки
+
+**API endpoints:**
+* Search: `GET /stores/{id}/products/search/?per_page=5&q={query}`
+* Cart read: `GET /cart/` + `X-Chain: metro`
+* Cart write: `POST /cart/items/` + `{items: [{ean, amount, operation}]}`
+  - `operation="add"` — додати товар
+  - `operation="set" amount=0` — видалити товар
+
+**Відомі нюанси Metro:**
+* Токен треба оновлювати вручну (~раз на 2 місяці), команда `/metro_auth TOKEN` — TODO
+* Морква та інші вагові (unit=kg) — "6 шт" конвертується в 0.6кг
+* Два записи яєць в шоп-листі → дві різні упаковки в кошику (нормальна поведінка)
+* Ціни в API зберігаються в копійках (divide by 100)
+
 ---
 
 ## Що далі
 
-### Фаза 3
-* **Різноманіття страв** — `cooked_log.json`, трекінг останнього приготування
-  + "що давно не готували?" — Мег пропонує забуті страви
-* **Metro агент** — авто-збір кошика на metro.zakaz.ua
+### Фаза 3 ✅
+* **Metro агент** — повністю реалізовано (див. нижче)
 
 ### Фаза 4
+* **Різноманіття страв** — `cooked_log.json`, трекінг останнього приготування
 * Проактивні пропозиції на базі паттернів споживання
 * Моніторинг акцій Metro
 * Щомісячний бюджет
+
+
 
 ---
 
@@ -152,5 +180,5 @@ https://github.com/sandalya/household_agent_v1/blob/main/PROGRESS.md
 
 Коротко: Telegram бот на Pi5, Python + Claude Sonnet + Pillow + faster-whisper,
 systemd сервіс household_agent, аліаси meg-*.
-Фаза 1 і Фаза 2 повністю зроблені. Починаємо Фазу 3.
+Фаза 1, Фаза 2 і Фаза 3 повністю зроблені.
 Працюємо через SSH (PuTTY), великими bash блоками, українською.

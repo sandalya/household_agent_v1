@@ -11,6 +11,7 @@ from telegram.ext import (
 )
 from core.config import TELEGRAM_TOKEN, OWNER_CHAT_ID, ADMIN_IDS
 from core import memory
+from core import metro
 from core.ai import chat
 from core import voice
 from core import kitchen
@@ -208,6 +209,36 @@ async def cmd_recipes(update, ctx):
     await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
 
+
+async def cmd_metro(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not is_authorized(update.effective_user.id):
+        return
+    items = memory.get_shopping()
+    if not items:
+        await update.message.reply_text("🛒 Шоп-ліст порожній. Додай товари — і я знайду їх у Metro!")
+        return
+
+    store = metro.get_store()
+    token = metro.load_token()
+
+    await update.message.reply_text(f"🔍 Шукаю {len(items)} товарів у {store['name']}...")
+
+    order = metro.build_order_from_shopping_list(items)
+
+    # Якщо є токен — заповнюємо кошик
+    if token:
+        result = metro.fill_cart_from_order(token, order)
+        cart_msg = f"\n\n🛒 Додано в кошик: {result['added']} товарів"
+        if result['skipped']:
+            cart_msg += f" (не вдалось: {result['skipped']})"
+        cart_msg += "\n👉 Відкрий додаток Metro — кошик вже заповнений!"
+    else:
+        cart_msg = "\n\n⚠️ Токен не збережено. Надішли /metro\_auth TOKEN"
+
+    msg = metro.format_order_message(order, store['name']) + cart_msg
+
+    await update.message.reply_text(msg, parse_mode='Markdown', disable_web_page_preview=True)
+
 async def cmd_clear(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not is_authorized(update.effective_user.id):
         return
@@ -353,6 +384,7 @@ def setup_handlers(app: Application):
     app.add_handler(CommandHandler("freezer",   cmd_freezer))
     app.add_handler(CommandHandler("inventory", cmd_inventory))
     app.add_handler(CommandHandler("recipes",   cmd_recipes))
+    app.add_handler(CommandHandler("metro",     cmd_metro))
     app.add_handler(CommandHandler("clear",     cmd_clear))
     app.add_handler(CommandHandler("reset",     cmd_reset))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))

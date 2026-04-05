@@ -1,0 +1,368 @@
+import json
+import logging
+import urllib.request
+import urllib.parse
+from pathlib import Path
+
+log = logging.getLogger('core.metro')
+
+BASE_DIR = Path(__file__).parent.parent
+METRO_CONFIG_FILE = BASE_DIR / 'data' / 'metro_config.json'
+
+# Магазини Metro Київ
+KYIV_STORES = {
+    "poznyaky": {"id": "48215610", "name": "Metro Позняки"},
+    "teremky":  {"id": "48215611", "name": "Metro Теремки"},
+    "troyeschyna": {"id": "48215633", "name": "Metro Троєщина"},
+}
+
+DEFAULT_STORE = "poznyaky"
+API_BASE = "https://stores-api.zakaz.ua/stores"
+
+
+def _load_config() -> dict:
+    if METRO_CONFIG_FILE.exists():
+        return json.loads(METRO_CONFIG_FILE.read_text(encoding='utf-8'))
+    return {"store_key": DEFAULT_STORE}
+
+
+def _save_config(cfg: dict):
+    METRO_CONFIG_FILE.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding='utf-8')
+
+
+def get_store() -> dict:
+    cfg = _load_config()
+    key = cfg.get("store_key", DEFAULT_STORE)
+    return KYIV_STORES.get(key, KYIV_STORES[DEFAULT_STORE])
+
+
+def set_store(key: str) -> bool:
+    if key not in KYIV_STORES:
+        return False
+    cfg = _load_config()
+    cfg["store_key"] = key
+    _save_config(cfg)
+    return True
+
+
+def search_product(query: str, store_id: str = None, per_page: int = 3) -> list[dict]:
+    """Пошук товару. Повертає список варіантів."""
+    if not store_id:
+        store_id = get_store()["id"]
+    q = urllib.parse.quote(query)
+    url = f"{API_BASE}/{store_id}/products/search/?per_page={per_page}&q={q}"
+    req = urllib.request.Request(url, headers={
+        "Accept-Language": "uk",
+        "User-Agent": "Mozilla/5.0"
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode('utf-8'))
+    except Exception as e:
+        log.error(f"Metro API error for '{query}': {e}")
+        return []
+
+    results = []
+    for item in data.get("results", []):
+        if not item.get("in_stock"):
+            continue
+        price_raw = item.get("price", 0)
+        old_price_raw = item.get("discount", {}).get("old_price", price_raw)
+        discount = item.get("discount", {})
+        results.append({
+            "title": item.get("title", ""),
+            "price": round(price_raw / 100, 2),
+            "old_price": round(old_price_raw / 100, 2) if discount.get("status") else None,
+            "discount_pct": discount.get("value", 0) if discount.get("status") else 0,
+            "ean": item.get("ean", ""),
+            "sku": item.get("sku", ""),
+            "url": item.get("web_url", ""),
+            "unit": item.get("unit", "pcs"),
+            "in_stock": item.get("in_stock", False),
+        })
+    return results
+
+
+
+import re as _re
+
+def _parse_quantity(item_text: str, unit: str) -> tuple[str, float]:
+    """
+    Витягує кількість з тексту товару.
+    Повертає (clean_query, amount).
+    """
+    text = item_text.strip()
+
+    # Шукаємо патерни: "14 шт", "6шт", "1.4кг", "50г", "210мл"
+    patterns = [
+        (r"(\d+(?:[.,]\d+)?)\s*кг", "kg"),
+        (r"(\d+(?:[.,]\d+)?)\s*г\b", "g"),
+        (r"(\d+(?:[.,]\d+)?)\s*мл\b", "ml"),
+        (r"(\d+(?:[.,]\d+)?)\s*шт\b", "pcs"),
+        (r"(\d+(?:[.,]\d+)?)\s*пучок", "pcs"),
+        (r"(\d+(?:[.,]\d+)?)\s*зубчик", "pcs"),
+    ]
+
+    amount = 1.0
+    clean = text
+
+    for pattern, qty_unit in patterns:
+        m = _re.search(pattern, text, _re.IGNORECASE)
+        if m:
+            val = float(m.group(1).replace(",", "."))
+            # Конвертуємо в одиниці API
+            if unit == "kg":
+                if qty_unit == "g":
+                    amount = round(val / 1000, 3)
+                elif qty_unit == "kg":
+                    amount = val
+                else:  # шт — просто кількість
+                    amount = val
+            else:
+                # pcs товар
+                if qty_unit in ("g", "ml"):
+                    amount = 1  # не конвертуємо, беремо 1 упаковку
+                else:
+                    amount = int(val)
+
+            # Прибираємо кількість з пошукового запиту
+            clean = _re.sub(r"\s*" + pattern, "", text, flags=_re.IGNORECASE).strip()
+            # Прибираємо залишки в дужках
+            clean = _re.sub(r"\s*\(.*?\)", "", clean).strip()
+            break
+
+    # Мінімум 1
+    if amount < 0.001:
+        amount = 1
+
+    return clean, amount
+
+
+def build_order_from_shopping_list(shopping_list: list[str], store_id: str = None) -> dict:
+    """
+    Для кожного товару зі списку шукає найкращий варіант в Metro.
+    Повертає:
+      found: [{item, product, price, url}]
+      not_found: [item]
+      total: float
+    """
+    found = []
+    not_found = []
+
+    for item in shopping_list:
+        # Прибираємо тільки дужки з поясненнями, решту залишаємо
+        import re as _re2
+        search_query = _re2.sub(r"\s*\(.*?\)", "", item).strip()
+        candidates = search_product(search_query, store_id=store_id, per_page=5)
+        best = pick_best_product(item, candidates)
+        if best:
+            found.append({
+                "item": item,
+                "product": best["title"],
+                "price": best["price"],
+                "old_price": best["old_price"],
+                "discount_pct": best["discount_pct"],
+                "url": best["url"],
+                "ean": best["ean"],
+                "amount": best.get("amount", 1),
+                "unit": best["unit"],
+            })
+        else:
+            not_found.append(item)
+
+    total = sum(p["price"] for p in found)
+    return {"found": found, "not_found": not_found, "total": round(total, 2)}
+
+
+def format_order_message(order: dict, store_name: str = None) -> str:
+    """Форматує повідомлення для підтвердження замовлення."""
+    if not store_name:
+        store_name = get_store()["name"]
+
+    lines = [f"🛒 *Замовлення в {store_name}*\n"]
+
+    for p in order["found"]:
+        price_str = f"{p['price']:.0f} грн"
+        if p.get("discount_pct"):
+            price_str += f" ~~{p['old_price']:.0f}~~ (-{p['discount_pct']}%)"
+        lines.append(f"✅ {p['item']}\n   [{p['product']}]({p['url']})\n   {price_str}")
+
+    if order["not_found"]:
+        lines.append("\n❌ *Не знайдено:*")
+        for item in order["not_found"]:
+            lines.append(f"   • {item}")
+
+    lines.append(f"\n💰 *Разом: {order['total']:.0f} грн*")
+    lines.append(f"\n🏪 [{store_name}](https://metro.zakaz.ua/uk/)")
+
+    return "\n".join(lines)
+
+
+# ── CART ──────────────────────────────────────────────────────────────────────
+
+CART_BASE = "https://stores-api.zakaz.ua/cart"
+
+def _cart_headers(token: str) -> dict:
+    return {
+        "Accept": "application/json",
+        "Accept-Language": "uk",
+        "Content-Type": "application/json",
+        "Origin": "https://metro.zakaz.ua",
+        "Referer": "https://metro.zakaz.ua/",
+        "User-Agent": "Mozilla/5.0",
+        "X-Chain": "metro",
+        "Cookie": f"__Host-zakaz-sid={token}",
+    }
+
+
+def save_token(token: str):
+    cfg = _load_config()
+    cfg["token"] = token
+    _save_config(cfg)
+
+
+def load_token() -> str | None:
+    return _load_config().get("token")
+
+
+def get_cart(token: str) -> dict | None:
+    req = urllib.request.Request(
+        f"{CART_BASE}/",
+        headers=_cart_headers(token)
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return json.loads(resp.read().decode('utf-8'))
+    except Exception as e:
+        log.error(f"get_cart error: {e}")
+        return None
+
+
+def clear_cart(token: str) -> bool:
+    """Очищає кошик перед заповненням."""
+    cart = get_cart(token)
+    if not cart:
+        return False
+    items = cart.get("items", [])
+    if not items:
+        return True
+    # Видаляємо кожен товар
+    payload = json.dumps({
+        "items": [{"ean": i["ean"], "amount": 0, "operation": "set"} for i in items]
+    }).encode('utf-8')
+    req = urllib.request.Request(
+        f"{CART_BASE}/items/",
+        data=payload,
+        headers=_cart_headers(token),
+        method="POST"
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return resp.status == 200
+    except Exception as e:
+        log.error(f"clear_cart error: {e}")
+        return False
+
+
+def add_to_cart(token: str, items: list[dict]) -> bool:
+    """
+    items: [{"ean": "...", "amount": 1}]
+    """
+    payload = json.dumps({
+        "items": [{"ean": i["ean"], "amount": i.get("amount", 1), "operation": "add"} for i in items]
+    }).encode('utf-8')
+    req = urllib.request.Request(
+        f"{CART_BASE}/items/",
+        data=payload,
+        headers=_cart_headers(token),
+        method="POST"
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return resp.status == 200
+    except Exception as e:
+        log.error(f"add_to_cart error: {e}")
+        return False
+
+
+def fill_cart_from_order(token: str, order: dict) -> dict:
+    """
+    Заповнює кошик з результату build_order_from_shopping_list.
+    Спочатку очищає кошик, потім додає товари.
+    Повертає: {added: int, skipped: int}
+    """
+    items_to_add = [{"ean": p["ean"], "amount": p.get("amount", 1)} for p in order["found"] if p.get("ean")]
+    if not items_to_add:
+        return {"added": 0, "skipped": len(order["found"])}
+    # Очищаємо кошик перед заповненням
+    clear_cart(token)
+    ok = add_to_cart(token, items_to_add)
+    return {
+        "added": len(items_to_add) if ok else 0,
+        "skipped": 0 if ok else len(items_to_add)
+    }
+
+
+def pick_best_product(item_query: str, candidates: list[dict]) -> dict | None:
+    """
+    Використовує Claude щоб вибрати найкращий товар зі списку кандидатів.
+    Повертає вибраний продукт з правильним amount.
+    """
+    import sys as _sys
+    _sys.path.insert(0, '/home/sashok/.openclaw/workspace/household_agent/venv/lib/python3.11/site-packages')
+    import anthropic
+    import json as _json
+    from core.config import ANTHROPIC_KEY as ANTHROPIC_API_KEY
+
+    if not candidates:
+        return None
+    if len(candidates) == 1:
+        return candidates[0]
+
+    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+
+    candidates_text = "\n".join([
+        f"{i+1}. {c['title']} | {c['price']} грн | unit={c['unit']}"
+        for i, c in enumerate(candidates)
+    ])
+
+    prompt = f"""Покупець хоче купити: "{item_query}"
+
+Доступні варіанти в Metro:
+{candidates_text}
+
+Вибери НАЙКРАЩИЙ варіант. Правила:
+- Назва має точно відповідати запиту (ігноруй нерелевантне — наприклад рисове борошно це не рис)
+- Якщо запит "рис 1кг" — шукай саме рис крупу, не борошно і не локшину
+- Для вагових товарів (unit=kg): якщо запит "морква 6 шт" — amount=0.6 (приблизно 100г на штуку)
+- Для штучних товарів в упаковках: якщо треба 14шт а упаковка 18шт — amount=1 (одна упаковка)
+- Якщо жоден варіант не підходить за змістом — поверни index=0
+
+Відповідай ТІЛЬКИ JSON (без пояснень):
+{{"index": 1, "amount": 1, "reason": "коротко чому"}}
+
+де index — номер товару (1-{len(candidates)}), або 0 якщо нічого не підходить.
+amount — скільки одиниць/кг купити."""
+
+    try:
+        resp = client.messages.create(
+            model="claude-sonnet-4-5",
+            max_tokens=100,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        text = resp.content[0].text.strip()
+        # Прибираємо можливі ```json
+        text = text.replace("```json", "").replace("```", "").strip()
+        data = _json.loads(text)
+        idx = data.get("index", 0)
+        amount = data.get("amount", 1)
+        reason = data.get("reason", "")
+        if idx == 0 or idx > len(candidates):
+            return None
+        result = dict(candidates[idx - 1])
+        result["amount"] = amount
+        log.info(f"pick_best '{item_query}' → #{idx} {result['title'][:30]} x{amount} ({reason})")
+        return result
+    except Exception as e:
+        log.error(f"pick_best error: {e}")
+        return candidates[0]
