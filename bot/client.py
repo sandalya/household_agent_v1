@@ -13,11 +13,16 @@ from core.config import TELEGRAM_TOKEN, OWNER_CHAT_ID, ADMIN_IDS
 from core import memory
 from core.ai import chat
 from core import voice
+from core import kitchen
+from core.recipe_fetcher import fetch_recipe_text, extract_urls
 
 log = logging.getLogger("bot.client")
 
 buffers: dict[int, dict] = {}
 BUFFER_WAIT = 3.0
+
+# назва останнього запропонованого рецепту (чекаємо фото превью)
+pending_recipe_image: dict[int, str] = {}  # user_id → recipe_name
 
 
 def is_authorized(user_id: int) -> bool:
@@ -170,8 +175,26 @@ async def handle_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not is_authorized(user_id):
         return
     text = (update.message.text or "").strip()
-    if text:
-        await _buffer(user_id, update, ctx, text=text)
+    if not text:
+        return
+
+    # перевіряємо чи є URL — якщо так, завантажуємо сторінку
+    urls = extract_urls(text)
+    if urls:
+        await update.message.reply_text("🔗 Завантажую сторінку...")
+        fetched_parts = []
+        for url in urls[:2]:  # максимум 2 посилання за раз
+            page_text = fetch_recipe_text(url)
+            if page_text:
+                fetched_parts.append(f"[Вміст сторінки {url}]: " + page_text)
+
+            else:
+                fetched_parts.append(f"[Не вдалось завантажити {url}]")
+        if fetched_parts:
+            text = text + "\n\n" + "\n\n".join(fetched_parts)
+
+
+    await _buffer(user_id, update, ctx, text=text)
 
 async def handle_photo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -183,6 +206,18 @@ async def handle_photo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     tmp_path = os.path.join(tempfile.gettempdir(), f"meg_{user_id}_{photo.file_unique_id}.jpg")
     await file.download_to_drive(tmp_path)
     log.info(f"Фото завантажено: {tmp_path}")
+
+    # чекаємо фото превью (окреме фото після збереження рецепту)
+    if user_id in pending_recipe_image and not caption:
+        recipe_name = pending_recipe_image.pop(user_id)
+        if recipe_name:
+            ok = kitchen.save_recipe_image(recipe_name, tmp_path)
+            if ok:
+                await update.message.reply_text(f"📷 Превью збережено для *{recipe_name}*", parse_mode="Markdown")
+                return
+        await update.message.reply_text("Не знайшла рецепт для цього фото.")
+        return
+
     await _buffer(user_id, update, ctx, text=caption, image_path=tmp_path)
 
 async def handle_document(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -237,6 +272,14 @@ async def _process(update: Update, user_id: int,
 
     reply = await chat(user_id, message, image_paths=image_paths)
     await update.message.reply_text(reply)
+
+    # якщо Claude щойно зберіг рецепт — запам'ятовуємо що наступне фото = превью
+    # якщо Claude щойно зберіг рецепт — наступне фото буде превью
+    if "збережено рецепт" in reply.lower() or "зберігаю рецепт" in reply.lower():
+        last = kitchen.get_last_recipe_name()
+        if last:
+            pending_recipe_image[user_id] = last
+            log.info(f"Чекаємо фото превью для: {last}")
 
 
 # ── Setup ─────────────────────────────────────────────────────────────────────

@@ -1,8 +1,14 @@
 """Кулінарний мозок — рецепти, підходи, заготовки."""
 import logging
+import shutil
+from pathlib import Path
 from core.memory import _load, _save
+from core.config import DATA_DIR
 
 log = logging.getLogger("core.kitchen")
+
+IMAGES_DIR = DATA_DIR / "recipe_images"
+IMAGES_DIR.mkdir(exist_ok=True)
 
 
 def get_recipes() -> dict:
@@ -10,7 +16,6 @@ def get_recipes() -> dict:
 
 
 def add_cooking_style(tip: str):
-    """Запам'ятати кулінарний підхід сім'ї."""
     data = get_recipes()
     tip = tip.strip()
     if tip and tip not in data["cooking_style"]:
@@ -20,22 +25,52 @@ def add_cooking_style(tip: str):
 
 
 def add_recipe(name: str, ingredients: list, steps: str, tags: list = None):
-    """Зберегти рецепт."""
     data = get_recipes()
-    # Оновлюємо якщо вже є
     data["recipes"] = [r for r in data["recipes"] if r["name"].lower() != name.lower()]
     data["recipes"].append({
         "name": name.strip(),
         "ingredients": ingredients,
         "steps": steps.strip(),
-        "tags": tags or []
+        "tags": tags or [],
+        "image": None,
     })
     _save("recipes.json", data)
     log.info(f"Збережено рецепт: {name}")
 
 
+def save_recipe_image(recipe_name: str, image_path: str) -> bool:
+    """Зберігає фото превью для рецепту."""
+    data = get_recipes()
+    for r in data["recipes"]:
+        if r["name"].lower() == recipe_name.lower():
+            suffix = Path(image_path).suffix or ".jpg"
+            safe_name = recipe_name.lower().replace(" ", "_")[:50]
+            dest = IMAGES_DIR / f"{safe_name}{suffix}"
+            shutil.copy2(image_path, dest)
+            r["image"] = str(dest)
+            _save("recipes.json", data)
+            log.info(f"Збережено фото для рецепту '{recipe_name}': {dest}")
+            return True
+    log.warning(f"Рецепт '{recipe_name}' не знайдено для збереження фото")
+    return False
+
+
+def get_last_recipe_name() -> str | None:
+    """Повертає назву останнього збереженого рецепту."""
+    data = get_recipes()
+    recipes = data.get("recipes", [])
+    return recipes[-1]["name"] if recipes else None
+
+
 def remove_recipe(name: str):
     data = get_recipes()
+    # видаляємо фото якщо є
+    for r in data["recipes"]:
+        if r["name"].lower() == name.lower() and r.get("image"):
+            try:
+                Path(r["image"]).unlink(missing_ok=True)
+            except Exception:
+                pass
     data["recipes"] = [r for r in data["recipes"] if r["name"].lower() != name.lower()]
     _save("recipes.json", data)
 
@@ -45,30 +80,26 @@ def get_purchase_history() -> dict:
 
 
 def format_for_prompt() -> str:
-    """Форматує кулінарні дані для системного промпту."""
     data = get_recipes()
     lines = []
-
     if data.get("cooking_style"):
         lines.append("**Наші підходи до готування:**")
         for tip in data["cooking_style"]:
             lines.append(f"- {tip}")
-
     recipes = data.get("recipes", [])
     if recipes:
         lines.append(f"\n**Збережені рецепти ({len(recipes)} шт):**")
         for r in recipes:
             tags = f" [{', '.join(r['tags'])}]" if r.get("tags") else ""
             ingr = ", ".join(r.get("ingredients", []))
-            lines.append(f"- {r['name']}{tags}: {ingr}")
+            has_img = " 📷" if r.get("image") else ""
+            lines.append(f"- {r['name']}{tags}{has_img}: {ingr}")
     else:
         lines.append("\n**Рецепти:** поки не збережені.")
-
     return "\n".join(lines) if lines else "Не заповнено."
 
 
 def format_purchase_history_for_prompt() -> str:
-    """Форматує список звичних покупок для промпту."""
     history = get_purchase_history()
     if not history:
         return "Не заповнено."
