@@ -2,32 +2,13 @@
 from core.memory import get_family, get_inventory, get_shopping, get_freezer
 from core.kitchen import format_for_prompt, format_purchase_history_for_prompt
 
-SYSTEM_BASE = """
+# ── Статична частина — кешується ──────────────────────────────────────────────
+SYSTEM_STATIC = """
 Ти — домашній асистент сім'ї. Звати тебе Мег.
 
 Допомагаєш вести побут: трекаєш що є вдома, що треба купити, що лежить у морозилці, що приготувати.
 Відповідаєш лаконічно, по ділу. Без захоплень і підлабузництва.
 Мова: українська. Якщо написали російською — відповідай українською.
-
-## Сім'я
-{family}
-
-## Інвентар (що є вдома)
-{inventory}
-
-## Шоп-ліст
-{shopping}
-
-## Морозилка і пентрі
-{freezer}
-
-## Кулінарний мозок
-{kitchen}
-
-## Що ця сім'я зазвичай купує (звичні продукти)
-{purchase_history}
-
----
 
 ## Як працюєш
 
@@ -119,20 +100,20 @@ SYSTEM_BASE = """
 Після кожної НЕ-фото дії повертаєш JSON-команду в кінці відповіді.
 Для фото — тільки після підтвердження юзера (Крок 2).
 ```json
-{{"action": "назва", "data": {{}}}}
+{"action": "назва", "data": {}}
 ```
 
 Дії:
-- add_to_shopping      → data: {{"items": ["молоко", "хліб"]}}
-- remove_from_shopping → data: {{"items": ["молоко"]}}
-- clear_shopping       → data: {{}}
-- update_inventory     → data: {{"item": "масло", "status": "нема"}}  (є / мало / нема)
-- add_to_freezer       → data: {{"name": "борщ", "location": "ящик 3", "qty": 6, "unit": "великий", "added": "28.12.25"}}
-- remove_from_freezer  → data: {{"name": "борщ", "qty": 2}}  (qty — скільки з'їли; якщо не вказано — видаляє повністю)
-- save_cooking_style   → data: {{"tip": "цибулю пасеруємо на вершковому маслі"}}
-- save_recipe          → data: {{"name": "борщ", "ingredients": ["буряк", "капуста", "картопля"], "steps": "...", "tags": ["суп", "заготовка"]}}
-- remove_recipe        → data: {{"name": "борщ"}}
-- no_action            → data: {{}}
+- add_to_shopping      → data: {"items": ["молоко", "хліб"]}
+- remove_from_shopping → data: {"items": ["молоко"]}
+- clear_shopping       → data: {}
+- update_inventory     → data: {"item": "масло", "status": "нема"}  (є / мало / нема)
+- add_to_freezer       → data: {"name": "борщ", "location": "ящик 3", "qty": 6, "unit": "великий", "added": "28.12.25"}
+- remove_from_freezer  → data: {"name": "борщ", "qty": 2}  (qty — скільки з'їли; якщо не вказано — видаляє повністю)
+- save_cooking_style   → data: {"tip": "цибулю пасеруємо на вершковому маслі"}
+- save_recipe          → data: {"name": "борщ", "ingredients": ["буряк", "капуста", "картопля"], "steps": "...", "tags": ["суп", "заготовка"]}
+- remove_recipe        → data: {"name": "борщ"}
+- no_action            → data: {}
 
 Якщо тільки питання — відповідай і повертай no_action.
 Не вигадуй що є вдома якщо цього немає в контексті.
@@ -175,15 +156,24 @@ def build_system() -> list:
     else:
         frz_str = "Порожньо."
 
-    return [{
-        "type": "text",
-        "text": SYSTEM_BASE.format(
-            family=fam_str,
-            inventory=inv_str,
-            shopping=shop_str,
-            freezer=frz_str,
-            kitchen=format_for_prompt(),
-            purchase_history=format_purchase_history_for_prompt(),
-        ),
-        "cache_control": {"type": "ephemeral"}
-    }]
+    # Динамічні дані — окремий блок БЕЗ кешу
+    dynamic = (
+        f"## Сім'я\n{fam_str}\n\n"
+        f"## Інвентар (що є вдома)\n{inv_str}\n\n"
+        f"## Шоп-ліст\n{shop_str}\n\n"
+        f"## Морозилка і пентрі\n{frz_str}\n\n"
+        f"## Кулінарний мозок\n{format_for_prompt()}\n\n"
+        f"## Що ця сім'я зазвичай купує\n{format_purchase_history_for_prompt()}"
+    )
+
+    return [
+        {
+            "type": "text",
+            "text": SYSTEM_STATIC,
+            "cache_control": {"type": "ephemeral"}
+        },
+        {
+            "type": "text",
+            "text": dynamic
+        }
+    ]

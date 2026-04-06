@@ -16,4 +16,4 @@ LOGS_DIR   = BASE_DIR / "logs"
 MEMORY_DIR = BASE_DIR / "memory"
 
 CLAUDE_MODEL      = "claude-sonnet-4-5"
-CLAUDE_MAX_TOKENS = 1024
+CLAUDE_MAX_TOKENS = 2048

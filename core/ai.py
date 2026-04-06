@@ -1,5 +1,6 @@
 """AI модуль — Claude Sonnet + Vision + парсинг дій."""
 import re
+import asyncio
 import json
 import base64
 import logging
@@ -18,7 +19,8 @@ client = anthropic.Anthropic(
     timeout=120.0
 )
 
-MAX_HISTORY_TOKENS = 6000
+MAX_HISTORY_TOKENS = 4000
+MAX_MSG_LEN = 3000
 
 
 def _optimize_history(history: list) -> list:
@@ -120,6 +122,33 @@ def _clean_reply(text: str) -> str:
     return re.sub(r"```json\s*\{.*?\}\s*```", "", text, flags=re.DOTALL).strip()
 
 
+
+async def _summarize_session(user_id: int, history: list) -> str:
+    """Стискає історію сесії в короткий summary."""
+    history_text = "\n".join([
+        f"{m['role'].upper()}: {str(m.get('content',''))[:300]}"
+        for m in history[-20:]
+    ])
+    prompt = f"""Стисни цю розмову з домашнім асистентом Мег в summary до 400 символів.
+Збережи: що просили зробити, що було додано/видалено зі списків, важливі деталі.
+Викидай: привітання, підтвердження, зайві деталі.
+Тільки факти, українською.
+
+Розмова:
+{history_text}
+
+Summary:"""
+    try:
+        resp = client.messages.create(
+            model=CLAUDE_MODEL,
+            max_tokens=200,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        return resp.content[0].text.strip()
+    except Exception as e:
+        log.error(f"summarize_session помилка: {e}")
+        return ""
+
 async def chat(user_id: int, user_message: str,
                image_paths: list = None, image_path: str = None) -> str:
     if image_path and not image_paths:
@@ -144,6 +173,9 @@ async def chat(user_id: int, user_message: str,
                 })
         except Exception as e:
             log.error(f"Помилка кодування фото {path}: {e}")
+
+    if user_message and len(user_message) > MAX_MSG_LEN:
+        user_message = user_message[:MAX_MSG_LEN] + "..."
 
     if image_paths and not user_message:
         user_message = f"Що бачиш на {'цих фото' if len(image_paths) > 1 else 'фото'}? Розпізнай і додай в інвентар."
@@ -179,6 +211,14 @@ async def chat(user_id: int, user_message: str,
     history_msg = f"{'[' + str(len(image_paths)) + ' фото] ' if image_paths else ''}{user_message}".strip()
     history.append({"role": "user", "content": history_msg})
     history.append({"role": "assistant", "content": reply})
-    memory.save_session(user_id, history)
+
+    if memory.needs_summary(user_id):
+        summary = await _summarize_session(user_id, history)
+        if summary:
+            memory.save_session_with_summary(user_id, history, summary)
+        else:
+            memory.save_session(user_id, history)
+    else:
+        memory.save_session(user_id, history)
 
     return _clean_reply(reply)

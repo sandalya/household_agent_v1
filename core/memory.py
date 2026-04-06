@@ -125,3 +125,20 @@ def clear_session(user_id: int):
     sessions = _load("sessions.json", {})
     sessions[str(user_id)] = []
     _save("sessions.json", sessions)
+
+# ── Rolling summary ────────────────────────────────────────────────────────────
+SUMMARY_THRESHOLD = 16  # при досягненні — стискаємо
+SUMMARY_KEEP = 4        # скільки останніх повідомлень зберігаємо після summary
+
+def needs_summary(user_id: int) -> bool:
+    return len(get_session(user_id)) >= SUMMARY_THRESHOLD
+
+def save_session_with_summary(user_id: int, messages: list, summary: str):
+    """Замінює стару історію на summary + останні повідомлення."""
+    sessions = _load("sessions.json", {})
+    recent = messages[-SUMMARY_KEEP:]
+    compressed = [{"role": "user", "content": f"[Summary попередньої розмови]: {summary}"},
+                  {"role": "assistant", "content": "Зрозуміла, продовжую."}] + recent
+    sessions[str(user_id)] = compressed
+    _save("sessions.json", sessions)
+    log.info(f"Session {user_id} стиснуто: {len(messages)} → {len(compressed)} повідомлень")
