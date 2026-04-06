@@ -240,6 +240,18 @@ async def cmd_metro(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(msg, parse_mode='Markdown', disable_web_page_preview=True)
 
+
+async def cmd_metro_auth(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not is_authorized(update.effective_user.id):
+        return
+    args = ctx.args
+    if not args:
+        await update.message.reply_text("Використання: /metro_auth ТОКЕН")
+        return
+    token = args[0].strip()
+    metro.save_token(token)
+    await update.message.reply_text("✅ Токен Metro збережено! Тепер /metro буде заповнювати кошик.")
+
 async def cmd_clear(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not is_authorized(update.effective_user.id):
         return
@@ -391,6 +403,7 @@ def setup_handlers(app: Application):
     app.add_handler(CommandHandler("inventory", cmd_inventory))
     app.add_handler(CommandHandler("recipes",   cmd_recipes))
     app.add_handler(CommandHandler("metro",     cmd_metro))
+    app.add_handler(CommandHandler("metro_auth", cmd_metro_auth))
     app.add_handler(CommandHandler("clear",     cmd_clear))
     app.add_handler(CommandHandler("reset",     cmd_reset))
     app.add_handler(CommandHandler("stats",     cmd_stats))
