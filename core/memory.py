@@ -127,8 +127,8 @@ def clear_session(user_id: int):
     _save("sessions.json", sessions)
 
 # ── Rolling summary ────────────────────────────────────────────────────────────
-SUMMARY_THRESHOLD = 16  # при досягненні — стискаємо
-SUMMARY_KEEP = 4        # скільки останніх повідомлень зберігаємо після summary
+SUMMARY_THRESHOLD = 20  # при досягненні — стискаємо
+SUMMARY_KEEP = 6        # скільки останніх повідомлень зберігаємо після summary
 
 def needs_summary(user_id: int) -> bool:
     return len(get_session(user_id)) >= SUMMARY_THRESHOLD

@@ -156,6 +156,16 @@ async def chat(user_id: int, user_message: str,
     image_paths = image_paths or []
 
     history = memory.get_session(user_id)
+
+    # Превентивне стиснення до відправки в Claude
+    if memory.needs_summary(user_id):
+        log.info(f"[{user_id}] Сесія {len(history)} повідомлень — стискаємо перед запитом")
+        summary = await _summarize_session(user_id, history)
+        if summary:
+            memory.save_session_with_summary(user_id, history, summary)
+            history = memory.get_session(user_id)  # оновлена стиснута версія
+            log.info(f"[{user_id}] Стиснуто: {len(history)} повідомлень")
+
     optimized = _optimize_history(history)
 
     content = []
@@ -212,13 +222,5 @@ async def chat(user_id: int, user_message: str,
     history.append({"role": "user", "content": history_msg})
     history.append({"role": "assistant", "content": reply})
 
-    if memory.needs_summary(user_id):
-        summary = await _summarize_session(user_id, history)
-        if summary:
-            memory.save_session_with_summary(user_id, history, summary)
-        else:
-            memory.save_session(user_id, history)
-    else:
-        memory.save_session(user_id, history)
-
+    memory.save_session(user_id, history)
     return _clean_reply(reply)
