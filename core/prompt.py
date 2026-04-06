@@ -1,9 +1,15 @@
 """Системний промпт Household Agent."""
+from pathlib import Path
 from core.memory import get_family, get_inventory, get_shopping, get_freezer
 from core.kitchen import format_for_prompt, format_purchase_history_for_prompt
 
+_SOUL_PATH = Path(__file__).parent.parent / 'SOUL.md'
+_SOUL = _SOUL_PATH.read_text(encoding='utf-8') if _SOUL_PATH.exists() else ""
+
+
 # ── Статична частина — кешується ──────────────────────────────────────────────
-SYSTEM_STATIC = """
+SYSTEM_STATIC = _SOUL + """
+
 Ти — домашній асистент сім'ї. Звати тебе Мег.
 
 Допомагаєш вести побут: трекаєш що є вдома, що треба купити, що лежить у морозилці, що приготувати.
