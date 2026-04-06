@@ -10,6 +10,7 @@ from core.config import ANTHROPIC_KEY, CLAUDE_MODEL, CLAUDE_MAX_TOKENS
 from core.prompt import build_system
 from core import memory
 from core import kitchen
+from core import token_tracker
 
 log = logging.getLogger("core.ai")
 
@@ -202,11 +203,20 @@ async def chat(user_id: int, user_message: str,
         )
         reply = response.content[0].text
         u = response.usage
+        cache_read = getattr(u, 'cache_read_input_tokens', 0)
+        cache_created = getattr(u, 'cache_creation_input_tokens', 0)
         log.info(
             f"[{user_id}] фото={len(image_paths)} "
             f"in={u.input_tokens} out={u.output_tokens} "
-            f"cache_read={getattr(u,'cache_read_input_tokens',0)} "
-            f"cache_created={getattr(u,'cache_creation_input_tokens',0)}"
+            f"cache_read={cache_read} "
+            f"cache_created={cache_created}"
+        )
+        token_tracker.track(
+            input_tokens=u.input_tokens,
+            output_tokens=u.output_tokens,
+            cache_read=cache_read,
+            cache_created=cache_created,
+            has_image=bool(image_paths),
         )
     except anthropic.APIError as e:
         log.error(f"Anthropic API: {e}")

@@ -11,6 +11,7 @@ from telegram.ext import (
 )
 from core.config import TELEGRAM_TOKEN, OWNER_CHAT_ID, ADMIN_IDS
 from core import memory
+from core import token_tracker
 from core import metro
 from core.ai import chat
 from core import voice
@@ -378,6 +379,11 @@ async def post_init(app):
         ("reset",     "🔄 Скинути сесію"),
     ])
 
+
+async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = token_tracker.format_stats(days=7)
+    await update.message.reply_text(text)
+
 def setup_handlers(app: Application):
     app.add_handler(CommandHandler("start",     cmd_start))
     app.add_handler(CommandHandler("list",      cmd_list))
@@ -387,6 +393,7 @@ def setup_handlers(app: Application):
     app.add_handler(CommandHandler("metro",     cmd_metro))
     app.add_handler(CommandHandler("clear",     cmd_clear))
     app.add_handler(CommandHandler("reset",     cmd_reset))
+    app.add_handler(CommandHandler("stats",     cmd_stats))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.Document.IMAGE, handle_document))
