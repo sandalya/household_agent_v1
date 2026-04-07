@@ -224,7 +224,12 @@ async def cmd_metro(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(f"🔍 Шукаю {len(items)} товарів у {store['name']}...")
 
-    order = metro.build_order_from_shopping_list(items)
+    ean_index = {}
+    if token:
+        lists = metro.get_lists(token)
+        if lists:
+            ean_index = metro.build_ean_index(lists)
+    order = metro.build_order_from_shopping_list(items, ean_index=ean_index)
 
     # Якщо є токен — заповнюємо кошик
     if token:

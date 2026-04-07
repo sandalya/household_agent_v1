@@ -138,30 +138,49 @@ def _parse_quantity(item_text: str, unit: str) -> tuple[str, float]:
     return clean, amount
 
 
-def build_order_from_shopping_list(shopping_list: list[str], store_id: str = None) -> dict:
+def build_order_from_shopping_list(shopping_list: list[str], store_id: str = None, ean_index: dict = None) -> dict:
     """
     Для кожного товару зі списку шукає найкращий варіант в Metro.
+    Спочатку шукає в ean_index (списки заказ.юа), потім через пошук+Claude.
     Повертає:
       found: [{item, product, price, url}]
       not_found: [item]
       total: float
     """
+    import re as _re2
     found = []
     not_found = []
 
     for item in shopping_list:
-        # Прибираємо тільки дужки з поясненнями, решту залишаємо
-        import re as _re2
         search_query = _re2.sub(r"\s*\(.*?\)", "", item).strip()
-        candidates = search_product(search_query, store_id=store_id, per_page=5)
-        best = pick_best_product(item, candidates)
+        best = None
+
+        # Спочатку шукаємо в списках заказ.юа по ean
+        if ean_index:
+            for ean in ean_index:
+                candidates = search_product(ean, store_id=store_id, per_page=1)
+                if candidates:
+                    c = candidates[0]
+                    title_lower = c["title"].lower()
+                    query_lower = search_query.lower().split()[0]
+                    if query_lower in title_lower:
+                        best = c
+                        best["amount"] = 1
+                        log.info(f"list match: {item} -> {c['title']} (ean={ean})")
+                        break
+
+        # Якщо не знайшли в списках — шукаємо через пошук+Claude
+        if not best:
+            candidates = search_product(search_query, store_id=store_id, per_page=5)
+            best = pick_best_product(item, candidates)
+
         if best:
             found.append({
                 "item": item,
                 "product": best["title"],
                 "price": best["price"],
-                "old_price": best["old_price"],
-                "discount_pct": best["discount_pct"],
+                "old_price": best.get("old_price"),
+                "discount_pct": best.get("discount_pct", 0),
                 "url": best["url"],
                 "ean": best["ean"],
                 "amount": best.get("amount", 1),
@@ -374,6 +393,35 @@ PATTERNS_FILE = BASE_DIR / 'data' / 'purchase_patterns.json'
 USER_API_BASE = "https://stores-api.zakaz.ua/user"
 
 
+
+LISTS_FILE = BASE_DIR / 'data' / 'zakaz_lists.json'
+
+
+def get_lists(token: str) -> list[dict] | None:
+    """Завантажує списки користувача з заказ.юа."""
+    url = f"{USER_API_BASE}/lists"
+    req = urllib.request.Request(url, headers=_cart_headers(token))
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode('utf-8'))
+        LISTS_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding='utf-8')
+        log.info(f"get_lists: завантажено {len(data)} списків")
+        return data
+    except Exception as e:
+        log.error(f"get_lists error: {e}")
+        return None
+
+
+def build_ean_index(lists: list[dict]) -> dict[str, str]:
+    """Будує індекс ean -> list_name для швидкого пошуку."""
+    index = {}
+    for lst in lists:
+        for item in lst.get('items', []):
+            ean = item.get('ean', '')
+            if ean:
+                index[ean] = lst.get('name', '')
+    return index
+
 def get_all_orders(token: str) -> list[dict]:
     """Завантажує всі замовлення з усіх сторінок."""
     all_orders = []
@@ -496,6 +544,35 @@ def format_patterns_message(patterns: dict) -> str:
 PATTERNS_FILE = BASE_DIR / 'data' / 'purchase_patterns.json'
 USER_API_BASE = "https://stores-api.zakaz.ua/user"
 
+
+
+LISTS_FILE = BASE_DIR / 'data' / 'zakaz_lists.json'
+
+
+def get_lists(token: str) -> list[dict] | None:
+    """Завантажує списки користувача з заказ.юа."""
+    url = f"{USER_API_BASE}/lists"
+    req = urllib.request.Request(url, headers=_cart_headers(token))
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode('utf-8'))
+        LISTS_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding='utf-8')
+        log.info(f"get_lists: завантажено {len(data)} списків")
+        return data
+    except Exception as e:
+        log.error(f"get_lists error: {e}")
+        return None
+
+
+def build_ean_index(lists: list[dict]) -> dict[str, str]:
+    """Будує індекс ean -> list_name для швидкого пошуку."""
+    index = {}
+    for lst in lists:
+        for item in lst.get('items', []):
+            ean = item.get('ean', '')
+            if ean:
+                index[ean] = lst.get('name', '')
+    return index
 
 def get_all_orders(token: str) -> list[dict]:
     """Завантажує всі замовлення з усіх сторінок."""
