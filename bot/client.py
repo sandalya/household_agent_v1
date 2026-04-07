@@ -241,6 +241,22 @@ async def cmd_metro(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(msg, parse_mode='Markdown', disable_web_page_preview=True)
 
 
+
+async def cmd_analyze_orders(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    token = metro.load_token()
+    if not token:
+        await update.message.reply_text('❌ Токен Metro не знайдено. Використай /metro_auth TOKEN')
+        return
+    await update.message.reply_text('⏳ Завантажую замовлення...')
+    orders = metro.get_all_orders(token)
+    if not orders:
+        await update.message.reply_text('❌ Не вдалося завантажити замовлення. Перевір токен.')
+        return
+    await update.message.reply_text(f'✅ Знайдено {len(orders)} замовлень. Аналізую...')
+    patterns = metro.analyze_purchase_patterns(orders)
+    msg = metro.format_patterns_message(patterns)
+    await update.message.reply_text(msg, parse_mode='Markdown')
+
 async def cmd_metro_auth(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not is_authorized(update.effective_user.id):
         return
@@ -252,6 +268,22 @@ async def cmd_metro_auth(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     metro.save_token(token)
     await update.message.reply_text("✅ Токен Metro збережено! Тепер /metro буде заповнювати кошик.")
 
+
+
+async def cmd_analyze_orders(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    token = metro.load_token()
+    if not token:
+        await update.message.reply_text('❌ Токен Metro не знайдено. Використай /metro_auth TOKEN')
+        return
+    await update.message.reply_text('⏳ Завантажую замовлення...')
+    orders = metro.get_all_orders(token)
+    if not orders:
+        await update.message.reply_text('❌ Не вдалося завантажити замовлення. Перевір токен.')
+        return
+    await update.message.reply_text(f'✅ Знайдено {len(orders)} замовлень. Аналізую...')
+    patterns = metro.analyze_purchase_patterns(orders)
+    msg = metro.format_patterns_message(patterns)
+    await update.message.reply_text(msg, parse_mode='Markdown')
 
 async def cmd_metro_auth(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not is_authorized(update.effective_user.id):
@@ -411,7 +443,7 @@ def setup_handlers(app: Application):
     app.add_handler(CommandHandler("recipes",   cmd_recipes))
     app.add_handler(CommandHandler("metro",     cmd_metro))
     app.add_handler(CommandHandler("metro_auth", cmd_metro_auth))
-    app.add_handler(CommandHandler("metro_auth", cmd_metro_auth))
+    app.add_handler(CommandHandler("analyze_orders", cmd_analyze_orders))
     app.add_handler(CommandHandler("clear",     cmd_clear))
     app.add_handler(CommandHandler("reset",     cmd_reset))
     app.add_handler(CommandHandler("stats",     cmd_stats))

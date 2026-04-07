@@ -366,3 +366,249 @@ amount — скільки одиниць/кг купити."""
     except Exception as e:
         log.error(f"pick_best error: {e}")
         return candidates[0]
+
+
+# ── ORDERS ANALYSIS ───────────────────────────────────────────────────────────
+
+PATTERNS_FILE = BASE_DIR / 'data' / 'purchase_patterns.json'
+USER_API_BASE = "https://stores-api.zakaz.ua/user"
+
+
+def get_all_orders(token: str) -> list[dict]:
+    """Завантажує всі замовлення з усіх сторінок."""
+    all_orders = []
+    page = 1
+    while True:
+        url = f"{USER_API_BASE}/orders/?page={page}&per_page=10&items_count=10"
+        req = urllib.request.Request(url, headers=_cart_headers(token))
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read().decode('utf-8'))
+        except Exception as e:
+            log.error(f"get_all_orders page={page} error: {e}")
+            break
+        if not data:
+            break
+        all_orders.extend(data)
+        if len(data) < 10:
+            break
+        page += 1
+    log.info(f"get_all_orders: завантажено {len(all_orders)} замовлень")
+    return all_orders
+
+
+def analyze_purchase_patterns(orders: list[dict]) -> dict:
+    """
+    Аналізує замовлення і повертає патерни закупок.
+    Зберігає результат в data/purchase_patterns.json
+    """
+    from collections import defaultdict
+
+    product_stats = defaultdict(lambda: {
+        "title": "",
+        "ean": "",
+        "order_count": 0,
+        "total_amount": 0.0,
+        "avg_amount": 0.0,
+        "unit": "pcs",
+        "avg_price": 0.0,
+        "orders": [],
+    })
+
+    total_orders = len(orders)
+
+    for order in orders:
+        order_id = order.get("id", "")
+        order_date = order.get("created", "")
+        for item in order.get("items", []):
+            ean = item.get("ean", "")
+            if not ean:
+                continue
+            s = product_stats[ean]
+            s["title"] = item.get("title", "")
+            s["ean"] = ean
+            s["unit"] = item.get("unit", "pcs")
+            s["order_count"] += 1
+            amount = item.get("amount", 1)
+            if s["unit"] == "kg":
+                amount = round(amount / 1000, 2)
+            s["total_amount"] += amount
+            s["avg_price"] = round(item.get("price", 0) / 100, 2)
+            s["orders"].append({"id": order_id, "date": order_date, "amount": amount})
+
+    # Рахуємо середню кількість і частоту
+    results = []
+    for ean, s in product_stats.items():
+        s["avg_amount"] = round(s["total_amount"] / s["order_count"], 2)
+        s["frequency_pct"] = round(s["order_count"] / total_orders * 100)
+        results.append(s)
+
+    # Сортуємо по частоті
+    results.sort(key=lambda x: x["order_count"], reverse=True)
+
+    patterns = {
+        "total_orders": total_orders,
+        "analyzed_at": __import__('datetime').datetime.now().strftime("%d.%m.%Y %H:%M"),
+        "products": results,
+    }
+
+    PATTERNS_FILE.write_text(
+        json.dumps(patterns, ensure_ascii=False, indent=2),
+        encoding='utf-8'
+    )
+    log.info(f"analyze_purchase_patterns: {len(results)} унікальних товарів збережено")
+    return patterns
+
+
+def format_patterns_message(patterns: dict) -> str:
+    """Форматує результат аналізу для Telegram."""
+    total = patterns["total_orders"]
+    products = patterns["products"]
+    date = patterns.get("analyzed_at", "")
+
+    lines = [f"📊 *Аналіз закупок Metro*", f"_Замовлень проаналізовано: {total} | {date}_\n"]
+
+    # Регулярні (100% замовлень)
+    always = [p for p in products if p["order_count"] == total]
+    if always:
+        lines.append("🔁 *Беремо завжди:*")
+        for p in always:
+            lines.append(f"  • {p['title']} — {p['avg_amount']} {p['unit']} щоразу")
+
+    # Часто (більше 50%)
+    often = [p for p in products if 0 < p["order_count"] < total and p["frequency_pct"] >= 50]
+    if often:
+        lines.append("\n📌 *Часто беремо:*")
+        for p in often:
+            lines.append(f"  • {p['title']} — {p['frequency_pct']}% замовлень")
+
+    # Рідко
+    rare = [p for p in products if p["frequency_pct"] < 50]
+    if rare:
+        lines.append(f"\n🔸 *Рідше:* {len(rare)} товарів")
+
+    lines.append(f"\n_Всього унікальних товарів: {len(products)}_")
+    return "\n".join(lines)
+
+
+# ── ORDERS ANALYSIS ───────────────────────────────────────────────────────────
+
+PATTERNS_FILE = BASE_DIR / 'data' / 'purchase_patterns.json'
+USER_API_BASE = "https://stores-api.zakaz.ua/user"
+
+
+def get_all_orders(token: str) -> list[dict]:
+    """Завантажує всі замовлення з усіх сторінок."""
+    all_orders = []
+    page = 1
+    while True:
+        url = f"{USER_API_BASE}/orders/?page={page}&per_page=10&items_count=10"
+        req = urllib.request.Request(url, headers=_cart_headers(token))
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read().decode('utf-8'))
+        except Exception as e:
+            log.error(f"get_all_orders page={page} error: {e}")
+            break
+        if not data:
+            break
+        all_orders.extend(data)
+        if len(data) < 10:
+            break
+        page += 1
+    log.info(f"get_all_orders: завантажено {len(all_orders)} замовлень")
+    return all_orders
+
+
+def analyze_purchase_patterns(orders: list[dict]) -> dict:
+    """
+    Аналізує замовлення і повертає патерни закупок.
+    Зберігає результат в data/purchase_patterns.json
+    """
+    from collections import defaultdict
+
+    product_stats = defaultdict(lambda: {
+        "title": "",
+        "ean": "",
+        "order_count": 0,
+        "total_amount": 0.0,
+        "avg_amount": 0.0,
+        "unit": "pcs",
+        "avg_price": 0.0,
+        "orders": [],
+    })
+
+    total_orders = len(orders)
+
+    for order in orders:
+        order_id = order.get("id", "")
+        order_date = order.get("created", "")
+        for item in order.get("items", []):
+            ean = item.get("ean", "")
+            if not ean:
+                continue
+            s = product_stats[ean]
+            s["title"] = item.get("title", "")
+            s["ean"] = ean
+            s["unit"] = item.get("unit", "pcs")
+            s["order_count"] += 1
+            amount = item.get("amount", 1)
+            if s["unit"] == "kg":
+                amount = round(amount / 1000, 2)
+            s["total_amount"] += amount
+            s["avg_price"] = round(item.get("price", 0) / 100, 2)
+            s["orders"].append({"id": order_id, "date": order_date, "amount": amount})
+
+    # Рахуємо середню кількість і частоту
+    results = []
+    for ean, s in product_stats.items():
+        s["avg_amount"] = round(s["total_amount"] / s["order_count"], 2)
+        s["frequency_pct"] = round(s["order_count"] / total_orders * 100)
+        results.append(s)
+
+    # Сортуємо по частоті
+    results.sort(key=lambda x: x["order_count"], reverse=True)
+
+    patterns = {
+        "total_orders": total_orders,
+        "analyzed_at": __import__('datetime').datetime.now().strftime("%d.%m.%Y %H:%M"),
+        "products": results,
+    }
+
+    PATTERNS_FILE.write_text(
+        json.dumps(patterns, ensure_ascii=False, indent=2),
+        encoding='utf-8'
+    )
+    log.info(f"analyze_purchase_patterns: {len(results)} унікальних товарів збережено")
+    return patterns
+
+
+def format_patterns_message(patterns: dict) -> str:
+    """Форматує результат аналізу для Telegram."""
+    total = patterns["total_orders"]
+    products = patterns["products"]
+    date = patterns.get("analyzed_at", "")
+
+    lines = [f"📊 *Аналіз закупок Metro*", f"_Замовлень проаналізовано: {total} | {date}_\n"]
+
+    # Регулярні (100% замовлень)
+    always = [p for p in products if p["order_count"] == total]
+    if always:
+        lines.append("🔁 *Беремо завжди:*")
+        for p in always:
+            lines.append(f"  • {p['title']} — {p['avg_amount']} {p['unit']} щоразу")
+
+    # Часто (більше 50%)
+    often = [p for p in products if 0 < p["order_count"] < total and p["frequency_pct"] >= 50]
+    if often:
+        lines.append("\n📌 *Часто беремо:*")
+        for p in often:
+            lines.append(f"  • {p['title']} — {p['frequency_pct']}% замовлень")
+
+    # Рідко
+    rare = [p for p in products if p["frequency_pct"] < 50]
+    if rare:
+        lines.append(f"\n🔸 *Рідше:* {len(rare)} товарів")
+
+    lines.append(f"\n_Всього унікальних товарів: {len(products)}_")
+    return "\n".join(lines)
