@@ -144,6 +144,24 @@ API заказ.юа підтримує поле comments при додаванн
 2. build_order_from_shopping_list() — генерувати comments для вагових товарів
 3. pick_best_product() — повертати suggested_comment якщо є уточнення в запиті
 
+
+### Фаза 5 — Історія покупок і мульти-акаунт Metro (DONE)
+
+#### Purchase History
+- Скрипт парсингу всієї історії замовлень zakaz.ua (254 замовлення)
+- Фільтрація по адресі: наші (Бажана, кв.323/11) vs дідусь (Попова)
+- data/purchase_history_ours.json — 1168 унікальних товарів, топ: яйця, молоко, банани
+- data/purchase_history_grandpa.json — 220 унікальних товарів, топ: кефір, згущене молоко
+- data/purchase_history_raw.json — всі 254 замовлення сирими даними
+
+#### Multi-user Metro токени
+- metro_config.json: users.sashok + users.ksu + active_user
+- /metro_auth TOKEN — зберігає токен для юзера який написав (per user_id)
+- /metro_sashok — перемикає на акаунт Сашка
+- /metro_ksu — перемикає на акаунт Ксюші
+- /metro_who — показує активний акаунт і збережених юзерів
+- KNOWN_USERS = {189793675: "sashok", 255525: "ksu"}
+
 ## Відомі нюанси
 
 - Фото як документи (не стиснуті) — handle_document()

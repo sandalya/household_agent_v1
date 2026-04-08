@@ -234,15 +234,50 @@ def _cart_headers(token: str) -> dict:
     }
 
 
-def save_token(token: str):
+KNOWN_USERS = {
+    189793675: "sashok",
+    255525: "ksu",
+}
+
+def save_token(token: str, user_id: int = None):
     cfg = _load_config()
     cfg["token"] = token
+    if user_id and user_id in KNOWN_USERS:
+        nick = KNOWN_USERS[user_id]
+        cfg.setdefault("users", {})[nick] = {"token": token, "user_id": user_id}
+        cfg["active_user"] = nick
+        log.info(f"save_token: збережено для {nick}")
     _save_config(cfg)
 
 
 def load_token() -> str | None:
-    return _load_config().get("token")
+    cfg = _load_config()
+    active = cfg.get("active_user")
+    if active:
+        users = cfg.get("users", {})
+        if active in users:
+            return users[active].get("token")
+    return cfg.get("token")
 
+
+def switch_user(nick: str) -> bool:
+    cfg = _load_config()
+    users = cfg.get("users", {})
+    if nick not in users:
+        return False
+    cfg["active_user"] = nick
+    cfg["token"] = users[nick]["token"]
+    _save_config(cfg)
+    log.info(f"switch_user: активний юзер -> {nick}")
+    return True
+
+
+def get_active_user() -> str | None:
+    return _load_config().get("active_user")
+
+
+def get_saved_users() -> dict:
+    return _load_config().get("users", {})
 
 def get_cart(token: str) -> dict | None:
     req = urllib.request.Request(
