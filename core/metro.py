@@ -724,3 +724,78 @@ def format_patterns_message(patterns: dict) -> str:
 
     lines.append(f"\n_Всього унікальних товарів: {len(products)}_")
     return "\n".join(lines)
+
+
+def suggest_missing_items(shopping_list: list, inventory: dict, top_n: int = 30, min_orders: int = 8) -> list[dict]:
+    """
+    Порівнює шоп-ліст і інвентар з purchase_patterns.
+    Повертає список товарів які варто додати (регулярні але відсутні).
+    """
+    if not PATTERNS_FILE.exists():
+        return []
+
+    patterns = json.loads(PATTERNS_FILE.read_text(encoding='utf-8'))
+    products = patterns.get("products", [])
+
+    # Нормалізуємо шоп-ліст і інвентар для порівняння
+    shopping_lower = set(i.lower() for i in shopping_list)
+    inventory_present = set(k.lower() for k, v in inventory.items() if v in ("є", "мало"))
+
+    suggestions = []
+    for p in products[:top_n * 3]:  # беремо з запасом бо будемо фільтрувати
+        if p["order_count"] < min_orders:
+            break
+        title = p["title"]
+        title_lower = title.lower()
+
+        # Перевіряємо чи є вже в шоп-листі (по першому слову)
+        first_word = title_lower.split()[0]
+        in_shopping = any(first_word in s for s in shopping_lower)
+        if in_shopping:
+            continue
+
+        # Перевіряємо інвентар
+        in_inventory = any(first_word in k for k in inventory_present)
+        if in_inventory:
+            continue
+
+        suggestions.append({
+            "title": title,
+            "ean": p["ean"],
+            "order_count": p["order_count"],
+            "avg_amount": p["avg_amount"],
+            "unit": p["unit"],
+            "frequency_pct": p["frequency_pct"],
+        })
+
+        if len(suggestions) >= top_n:
+            break
+
+    return suggestions
+
+
+def suggest_missing_items(shopping_list: list, inventory: dict, top_n: int = 30, min_orders: int = 8) -> list[dict]:
+    if not PATTERNS_FILE.exists():
+        return []
+    patterns = json.loads(PATTERNS_FILE.read_text(encoding="utf-8"))
+    products = patterns.get("products", [])
+    shopping_lower = set(i.lower() for i in shopping_list)
+    inventory_present = set(k.lower() for k, v in inventory.items() if v in ("є", "мало"))
+    suggestions = []
+    for p in products:
+        if p["order_count"] < min_orders:
+            break
+        title = p["title"]
+        title_lower = title.lower()
+        first_word = title_lower.split()[0]
+        in_shopping = any(first_word in s for s in shopping_lower)
+        if in_shopping:
+            continue
+        in_inventory = any(first_word in k for k in inventory_present)
+        if in_inventory:
+            continue
+        suggestions.append({"title": title, "ean": p["ean"], "order_count": p["order_count"], "avg_amount": p["avg_amount"], "unit": p["unit"], "frequency_pct": p["frequency_pct"]})
+        if len(suggestions) >= top_n:
+            break
+    return suggestions
+

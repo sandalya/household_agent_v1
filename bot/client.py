@@ -4,10 +4,10 @@ import asyncio
 import os
 import tempfile
 from pathlib import Path
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application, CommandHandler, MessageHandler,
-    filters, ContextTypes
+    filters, ContextTypes, CallbackQueryHandler
 )
 from core.config import TELEGRAM_TOKEN, OWNER_CHAT_ID, ADMIN_IDS
 from core import memory
@@ -218,34 +218,87 @@ async def cmd_metro(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not items:
         await update.message.reply_text("🛒 Шоп-ліст порожній. Додай товари — і я знайду їх у Metro!")
         return
+    inventory = memory.get_inventory()
+    suggestions = metro.suggest_missing_items(items, inventory)
+    if suggestions:
+        top = suggestions[:8]
+        ctx.user_data["metro_suggestions"] = top
+        ctx.user_data["metro_selected"] = []
+        text = "🤔 До речі, ти зазвичай береш, але зараз немає в списку:\nОбери що додати:"
+        buttons = []
+        for i, s in enumerate(top):
+            label = f"☐ {s['title']} ({s['frequency_pct']}%)"
+            buttons.append([InlineKeyboardButton(label, callback_data=f"metro_toggle_{i}")])
+        buttons.append([
+            InlineKeyboardButton("✅ Додати вибране і шукати", callback_data="metro_confirm"),
+            InlineKeyboardButton("⏭ Пропустити", callback_data="metro_skip"),
+        ])
+        await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+    else:
+        await run_metro_search(update.message, ctx)
 
+
+async def callback_metro_suggest(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+    if data == "metro_skip":
+        await query.edit_message_text("⏭ Окей, шукаю без змін...")
+        await run_metro_search(query.message, ctx)
+        return
+    if data == "metro_confirm":
+        selected = ctx.user_data.get("metro_selected", [])
+        suggestions = ctx.user_data.get("metro_suggestions", [])
+        if selected:
+            to_add = [suggestions[i]["title"] for i in selected]
+            memory.add_to_shopping(to_add)
+            await query.edit_message_text(f"✅ Додано: {', '.join(to_add)}\n🔍 Шукаю...")
+        else:
+            await query.edit_message_text("🔍 Шукаю без змін...")
+        await run_metro_search(query.message, ctx)
+        return
+    if data.startswith("metro_toggle_"):
+        idx = int(data.split("_")[-1])
+        selected = ctx.user_data.get("metro_selected", [])
+        if idx in selected:
+            selected.remove(idx)
+        else:
+            selected.append(idx)
+        ctx.user_data["metro_selected"] = selected
+        top = ctx.user_data.get("metro_suggestions", [])
+        buttons = []
+        for i, s in enumerate(top):
+            mark = "☑" if i in selected else "☐"
+            label = f"{mark} {s['title']} ({s['frequency_pct']}%)"
+            buttons.append([InlineKeyboardButton(label, callback_data=f"metro_toggle_{i}")])
+        buttons.append([
+            InlineKeyboardButton("✅ Додати вибране і шукати", callback_data="metro_confirm"),
+            InlineKeyboardButton("⏭ Пропустити", callback_data="metro_skip"),
+        ])
+        await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
+
+
+async def run_metro_search(message, ctx):
+    items = memory.get_shopping()
     store = metro.get_store()
     token = metro.load_token()
-
-    await update.message.reply_text(f"🔍 Шукаю {len(items)} товарів у {store['name']}...")
-
+    await message.reply_text(f"🔍 Шукаю {len(items)} товарів у {store['name']}...")
     ean_index = {}
     if token:
         lists = metro.get_lists(token)
         if lists:
             ean_index = metro.build_ean_index(lists)
     order = metro.build_order_from_shopping_list(items, ean_index=ean_index)
-
-    # Якщо є токен — заповнюємо кошик
     if token:
         result = metro.fill_cart_from_order(token, order)
         cart_msg = f"\n\n🛒 Додано в кошик: {result['added']} товарів"
-        if result['skipped']:
+        if result["skipped"]:
             cart_msg += f" (не вдалось: {result['skipped']})"
         cart_msg += "\n👉 Відкрий додаток Metro — кошик вже заповнений!"
     else:
-        cart_msg = "\n\n⚠️ Токен не збережено. Надішли /metro\_auth TOKEN"
-
-    msg = metro.format_order_message(order, store['name']) + cart_msg
-
-    await update.message.reply_text(msg, parse_mode='Markdown', disable_web_page_preview=True)
-
-
+        cart_msg = "\n\n⚠️ Токен не збережено. Надішли /metro\\_auth TOKEN"
+    msg = metro.format_order_message(order, store["name"]) + cart_msg
+    await message.reply_text(msg, parse_mode="Markdown", disable_web_page_preview=True)
 
 async def cmd_analyze_orders(update: Update, context: ContextTypes.DEFAULT_TYPE):
     token = metro.load_token()
@@ -459,6 +512,7 @@ def setup_handlers(app: Application):
     app.add_handler(CommandHandler("recipes",   cmd_recipes))
     app.add_handler(CommandHandler("metro",     cmd_metro))
     app.add_handler(CommandHandler("metro_auth", cmd_metro_auth))
+    app.add_handler(CallbackQueryHandler(callback_metro_suggest, pattern="^metro_"))
     app.add_handler(CommandHandler("metro_ksu",  cmd_metro_ksu))
     app.add_handler(CommandHandler("metro_sashok", cmd_metro_sashok))
     app.add_handler(CommandHandler("metro_who",  cmd_metro_who))

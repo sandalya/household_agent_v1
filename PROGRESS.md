@@ -162,6 +162,14 @@ API заказ.юа підтримує поле comments при додаванн
 - /metro_who — показує активний акаунт і збережених юзерів
 - KNOWN_USERS = {189793675: "sashok", 255525: "ksu"}
 
+
+### Фаза 5 — Розумний Metro (В ПРОЦЕСІ)
+- data/purchase_patterns.json — аналіз 254 замовлень, 1199 унікальних товарів
+- core/metro.py suggest_missing_items() — порівнює шоп-ліст+інвентар з patterns
+- /metro тепер показує InlineKeyboard з пропозиціями що забули купити
+- Кнопки: toggle вибору + "Додати вибране і шукати" + "Пропустити"
+- CallbackQueryHandler зареєстровано на pattern ^metro_
+
 ## Відомі нюанси
 
 - Фото як документи (не стиснуті) — handle_document()
@@ -185,7 +193,7 @@ API заказ.юа підтримує поле comments при додаванн
 - Після стабільного результату: meg-git або git з осмисленим комітом
 - Path стиль: Path(__file__).parent.parent як BASE_DIR
 - Логування: log = logging.getLogger('module.name')
-- ВАЖЛИВО: великі файли писати через python3 -c, не через cat heredoc — heredoc розбивається на кілька блоків у веб-інтерфейсі Claude і неможливо скопіювати
+- ВАЖЛИВО: великі файли писати через cat > /tmp/patch.py << 'EOF' (одинарні лапки навколо EOF). Потім python3 /tmp/patch.py. Всередині '''triple quotes''' \n писати як \\n
 
 ---
 
