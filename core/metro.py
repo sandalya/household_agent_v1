@@ -6,6 +6,10 @@ from pathlib import Path
 
 log = logging.getLogger('core.metro')
 
+
+class MetroUnavailableError(Exception):
+    pass
+
 BASE_DIR = Path(__file__).parent.parent
 METRO_CONFIG_FILE = BASE_DIR / 'data' / 'metro_config.json'
 
@@ -58,8 +62,13 @@ def search_product(query: str, store_id: str = None, per_page: int = 3) -> list[
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:
             data = json.loads(resp.read().decode('utf-8'))
+    except urllib.error.HTTPError as e:
+        log.error(f"Metro API error for \'{query}\': {e}")
+        if e.code in (503, 502, 504):
+            raise MetroUnavailableError(f"Metro API недоступний (HTTP {e.code})")
+        return []
     except Exception as e:
-        log.error(f"Metro API error for '{query}': {e}")
+        log.error(f"Metro API error for \'{query}\': {e}")
         return []
 
     results = []

@@ -288,7 +288,11 @@ async def run_metro_search(message, ctx):
         lists = metro.get_lists(token)
         if lists:
             ean_index = metro.build_ean_index(lists)
-    order = metro.build_order_from_shopping_list(items, ean_index=ean_index)
+    try:
+        order = metro.build_order_from_shopping_list(items, ean_index=ean_index)
+    except metro.MetroUnavailableError as e:
+        await message.reply_text(f"⚠️ {e}\n\nСпробуй пізніше — як запрацює, просто напиши /metro знову.")
+        return
     if token:
         result = metro.fill_cart_from_order(token, order)
         cart_msg = f"\n\n🛒 Додано в кошик: {result['added']} товарів"

@@ -1,14 +1,10 @@
-# SESSION — 2026-04-09
+# SESSION — 2026-04-10 16:27
 
 ## Проект
-household_agent (Меггі)
+household_agent
 
 ## Що зробили
-Фази 1-4 повністю done. Фаза 5 в процесі — purchase history, multi-user Metro, розумний Metro з InlineKeyboard пропозиціями.
+Додали MetroUnavailableError: при 503/502/504 від Metro API бот більше не висне, а повідомляє юзера і завершує команду gracefully (core/metro.py + bot/client.py)
 
 ## Наступний крок
-Фаза 5: збагатити zakaz_lists.json назвами товарів + коментарі до вагових товарів в кошику (add_to_cart + pick_best_product)
-
-## Контекст
-systemd: household_agent | аліаси: meg-* | venv всередині проекту
-data/ не в git — бекап окремо
+немає
