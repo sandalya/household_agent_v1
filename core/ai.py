@@ -1,4 +1,4 @@
-"""AI модуль — Claude Sonnet + Vision + парсинг дій."""
+"""AI модуль — Claude Sonnet + Vision + tool use."""
 import re
 import asyncio
 import json
@@ -23,6 +23,165 @@ client = anthropic.Anthropic(
 MAX_HISTORY_TOKENS = 4000
 MAX_MSG_LEN = 3000
 
+# ── Tool definitions ───────────────────────────────────────────────────────────
+
+TOOLS = [
+    {
+        "name": "add_to_shopping",
+        "description": "Додає один або кілька товарів до списку покупок",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Список товарів, наприклад: [\"молоко\", \"яйця 10шт\"]"
+                }
+            },
+            "required": ["items"]
+        }
+    },
+    {
+        "name": "remove_from_shopping",
+        "description": "Видаляє один або кілька товарів зі списку покупок",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Список товарів для видалення"
+                }
+            },
+            "required": ["items"]
+        }
+    },
+    {
+        "name": "clear_shopping",
+        "description": "Повністю очищає список покупок",
+        "input_schema": {
+            "type": "object",
+            "properties": {}
+        }
+    },
+    {
+        "name": "update_inventory",
+        "description": "Оновлює статус товару в інвентарі (є / мало / нема)",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "item":   {"type": "string", "description": "Назва товару"},
+                "status": {"type": "string", "enum": ["є", "мало", "нема"], "description": "Статус"}
+            },
+            "required": ["item", "status"]
+        }
+    },
+    {
+        "name": "add_to_freezer",
+        "description": "Додає продукт до морозилки",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "name":     {"type": "string", "description": "Назва продукту"},
+                "location": {"type": "string", "description": "Місце (верхня/середня/нижня полиця)"},
+                "qty":      {"type": "number", "description": "Кількість (необов'язково)"},
+                "unit":     {"type": "string", "description": "Одиниця виміру (необов'язково)"}
+            },
+            "required": ["name", "location"]
+        }
+    },
+    {
+        "name": "remove_from_freezer",
+        "description": "Видаляє або зменшує кількість продукту в морозилці",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Назва продукту"},
+                "qty":  {"type": "number", "description": "Кількість для зменшення (необов'язково)"}
+            },
+            "required": ["name"]
+        }
+    },
+    {
+        "name": "save_cooking_style",
+        "description": "Зберігає кулінарну пораду або стильову замітку",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "tip": {"type": "string", "description": "Текст поради"}
+            },
+            "required": ["tip"]
+        }
+    },
+    {
+        "name": "save_recipe",
+        "description": "Зберігає рецепт",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "name":        {"type": "string", "description": "Назва страви"},
+                "ingredients": {"type": "array", "items": {"type": "string"}, "description": "Список інгредієнтів"},
+                "steps":       {"type": "string", "description": "Кроки приготування"},
+                "tags":        {"type": "array", "items": {"type": "string"}, "description": "Теги"}
+            },
+            "required": ["name", "ingredients", "steps"]
+        }
+    },
+    {
+        "name": "remove_recipe",
+        "description": "Видаляє рецепт за назвою",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Назва рецепту"}
+            },
+            "required": ["name"]
+        }
+    },
+]
+
+# ── Tool executor ──────────────────────────────────────────────────────────────
+
+def _execute_tool(name: str, inp: dict) -> str:
+    try:
+        if name == "add_to_shopping":
+            memory.add_to_shopping(inp.get("items", []))
+        elif name == "remove_from_shopping":
+            memory.remove_from_shopping(inp.get("items", []))
+        elif name == "clear_shopping":
+            memory.clear_shopping()
+        elif name == "update_inventory":
+            memory.update_inventory(inp.get("item", ""), inp.get("status", "є"))
+        elif name == "add_to_freezer":
+            memory.add_to_freezer(
+                name=inp.get("name", ""),
+                location=inp.get("location", ""),
+                qty=inp.get("qty"),
+                unit=inp.get("unit"),
+            )
+        elif name == "remove_from_freezer":
+            memory.remove_from_freezer(inp.get("name", ""), inp.get("qty"))
+        elif name == "save_cooking_style":
+            kitchen.add_cooking_style(inp.get("tip", ""))
+        elif name == "save_recipe":
+            kitchen.add_recipe(
+                name=inp.get("name", ""),
+                ingredients=inp.get("ingredients", []),
+                steps=inp.get("steps", ""),
+                tags=inp.get("tags", []),
+            )
+        elif name == "remove_recipe":
+            kitchen.remove_recipe(inp.get("name", ""))
+        else:
+            log.warning(f"Невідомий tool: {name}")
+            return f"unknown tool: {name}"
+        return "ok"
+    except Exception as e:
+        log.error(f"_execute_tool {name} помилка: {e}")
+        return f"error: {e}"
+
+
+# ── Helpers ────────────────────────────────────────────────────────────────────
 
 def _optimize_history(history: list) -> list:
     result, total = [], 0
@@ -63,71 +222,9 @@ def _encode_image(image_path: str) -> tuple[str, str]:
         return base64.standard_b64encode(raw).decode("utf-8"), media_types.get(suffix, "image/jpeg")
 
 
-def _parse_multi_actions(text: str) -> list[dict]:
-    results = []
-    for match in re.finditer(r"```json\s*(\{.*?\})\s*```", text, re.DOTALL):
-        try:
-            results.append(json.loads(match.group(1)))
-        except json.JSONDecodeError:
-            pass
-    return results
-
-
-def _execute_action(action: dict):
-    name = action.get("action")
-    data = action.get("data", {})
-
-    # ── Шоп-ліст ──────────────────────────────────────────────────────────────
-    if name == "add_to_shopping":
-        memory.add_to_shopping(data.get("items", []))
-    elif name == "remove_from_shopping":
-        memory.remove_from_shopping(data.get("items", []))
-    elif name == "clear_shopping":
-        memory.clear_shopping()
-
-    # ── Інвентар ──────────────────────────────────────────────────────────────
-    elif name == "update_inventory":
-        memory.update_inventory(data.get("item", ""), data.get("status", "є"))
-
-    # ── Морозилка ─────────────────────────────────────────────────────────────
-    elif name == "add_to_freezer":
-        memory.add_to_freezer(
-            name=data.get("name", ""),
-            location=data.get("location", ""),
-            qty=data.get("qty"),
-            unit=data.get("unit"),
-        )
-    elif name == "remove_from_freezer":
-        memory.remove_from_freezer(data.get("name", ""), data.get("qty"))
-
-    # ── Кулінарний мозок ──────────────────────────────────────────────────────
-    elif name == "save_cooking_style":
-        kitchen.add_cooking_style(data.get("tip", ""))
-    elif name == "save_recipe":
-        kitchen.add_recipe(
-            name=data.get("name", ""),
-            ingredients=data.get("ingredients", []),
-            steps=data.get("steps", ""),
-            tags=data.get("tags", []),
-        )
-    elif name == "remove_recipe":
-        kitchen.remove_recipe(data.get("name", ""))
-
-    elif name == "no_action":
-        pass
-    else:
-        log.warning(f"Невідома дія: {name}")
-
-
-def _clean_reply(text: str) -> str:
-    return re.sub(r"```json\s*\{.*?\}\s*```", "", text, flags=re.DOTALL).strip()
-
-
-
 async def _summarize_session(user_id: int, history: list) -> str:
-    """Стискає історію сесії в короткий summary."""
     history_text = "\n".join([
-        f"{m['role'].upper()}: {str(m.get('content',''))[:300]}"
+        f"{m['role'].upper()}: {str(m.get('content', ''))[:300]}"
         for m in history[-20:]
     ])
     prompt = f"""Стисни цю розмову з домашнім асистентом Мег в summary до 400 символів.
@@ -150,6 +247,9 @@ Summary:"""
         log.error(f"summarize_session помилка: {e}")
         return ""
 
+
+# ── Main chat ──────────────────────────────────────────────────────────────────
+
 async def chat(user_id: int, user_message: str,
                image_paths: list = None, image_path: str = None) -> str:
     if image_path and not image_paths:
@@ -158,13 +258,12 @@ async def chat(user_id: int, user_message: str,
 
     history = memory.get_session(user_id)
 
-    # Превентивне стиснення до відправки в Claude
     if memory.needs_summary(user_id):
         log.info(f"[{user_id}] Сесія {len(history)} повідомлень — стискаємо перед запитом")
         summary = await _summarize_session(user_id, history)
         if summary:
             memory.save_session_with_summary(user_id, history, summary)
-            history = memory.get_session(user_id)  # оновлена стиснута версія
+            history = memory.get_session(user_id)
             log.info(f"[{user_id}] Стиснуто: {len(history)} повідомлень")
 
     optimized = _optimize_history(history)
@@ -178,10 +277,7 @@ async def chat(user_id: int, user_message: str,
                 "source": {"type": "base64", "media_type": media_type, "data": data}
             })
             if len(image_paths) > 1:
-                content.append({
-                    "type": "text",
-                    "text": f"[Фото {i+1} з {len(image_paths)}]"
-                })
+                content.append({"type": "text", "text": f"[Фото {i+1} з {len(image_paths)}]"})
         except Exception as e:
             log.error(f"Помилка кодування фото {path}: {e}")
 
@@ -189,10 +285,17 @@ async def chat(user_id: int, user_message: str,
         user_message = user_message[:MAX_MSG_LEN] + "..."
 
     if image_paths and not user_message:
-        user_message = f"Що бачиш на {'цих фото' if len(image_paths) > 1 else 'фото'}? Розпізнай і додай в інвентар."
+        user_message = "Що бачиш на цих фото? Розпізнай і додай в інвентар." if len(image_paths) > 1 else "Що бачиш на фото? Розпізнай і додай в інвентар."
     content.append({"type": "text", "text": user_message})
 
     optimized.append({"role": "user", "content": content})
+
+    # ── Agentic loop ───────────────────────────────────────────────────────────
+    reply_text = ""
+    total_input = 0
+    total_output = 0
+    total_cache_read = 0
+    total_cache_created = 0
 
     try:
         response = client.messages.create(
@@ -200,24 +303,48 @@ async def chat(user_id: int, user_message: str,
             max_tokens=CLAUDE_MAX_TOKENS,
             system=build_system(),
             messages=optimized,
+            tools=TOOLS,
         )
-        reply = response.content[0].text
+
         u = response.usage
-        cache_read = getattr(u, 'cache_read_input_tokens', 0)
-        cache_created = getattr(u, 'cache_creation_input_tokens', 0)
-        log.info(
-            f"[{user_id}] фото={len(image_paths)} "
-            f"in={u.input_tokens} out={u.output_tokens} "
-            f"cache_read={cache_read} "
-            f"cache_created={cache_created}"
-        )
-        token_tracker.track(
-            input_tokens=u.input_tokens,
-            output_tokens=u.output_tokens,
-            cache_read=cache_read,
-            cache_created=cache_created,
-            has_image=bool(image_paths),
-        )
+        total_input += u.input_tokens
+        total_output += u.output_tokens
+        total_cache_read += getattr(u, "cache_read_input_tokens", 0)
+        total_cache_created += getattr(u, "cache_creation_input_tokens", 0)
+
+        while response.stop_reason == "tool_use":
+            tool_results = []
+            for block in response.content:
+                if block.type == "tool_use":
+                    result = _execute_tool(block.name, block.input)
+                    log.info(f"[{user_id}] tool={block.name} input={block.input} result={result}")
+                    tool_results.append({
+                        "type": "tool_result",
+                        "tool_use_id": block.id,
+                        "content": result,
+                    })
+
+            optimized.append({"role": "assistant", "content": response.content})
+            optimized.append({"role": "user", "content": tool_results})
+
+            response = client.messages.create(
+                model=CLAUDE_MODEL,
+                max_tokens=CLAUDE_MAX_TOKENS,
+                system=build_system(),
+                messages=optimized,
+                tools=TOOLS,
+            )
+            u = response.usage
+            total_input += u.input_tokens
+            total_output += u.output_tokens
+            total_cache_read += getattr(u, "cache_read_input_tokens", 0)
+            total_cache_created += getattr(u, "cache_creation_input_tokens", 0)
+
+        for block in response.content:
+            if hasattr(block, "text"):
+                reply_text = block.text
+                break
+
     except anthropic.APIError as e:
         log.error(f"Anthropic API: {e}")
         return "Сервіс тимчасово недоступний."
@@ -225,12 +352,22 @@ async def chat(user_id: int, user_message: str,
         log.error(f"AI помилка: {e}")
         return "Технічна помилка. Спробуй ще раз."
 
-    for action in _parse_multi_actions(reply):
-        _execute_action(action)
+    log.info(
+        f"[{user_id}] фото={len(image_paths)} "
+        f"in={total_input} out={total_output} "
+        f"cache_read={total_cache_read} cache_created={total_cache_created}"
+    )
+    token_tracker.track(
+        input_tokens=total_input,
+        output_tokens=total_output,
+        cache_read=total_cache_read,
+        cache_created=total_cache_created,
+        has_image=bool(image_paths),
+    )
 
     history_msg = f"{'[' + str(len(image_paths)) + ' фото] ' if image_paths else ''}{user_message}".strip()
     history.append({"role": "user", "content": history_msg})
-    history.append({"role": "assistant", "content": reply})
-
+    history.append({"role": "assistant", "content": reply_text})
     memory.save_session(user_id, history)
-    return _clean_reply(reply)
+
+    return reply_text
