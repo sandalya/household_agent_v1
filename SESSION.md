@@ -1,10 +1,13 @@
-# SESSION — 2026-04-10 16:27
+# SESSION — 2026-04-11 14:29
 
 ## Проект
 household_agent
 
 ## Що зробили
-Додали MetroUnavailableError: при 503/502/504 від Metro API бот більше не висне, а повідомляє юзера і завершує команду gracefully (core/metro.py + bot/client.py)
+Переписали core/ai.py з текстового парсингу actions на нативний Claude tool use. Всі 9 actions стали tools. Прибрали JSON-інструкцію з prompt.py. Фікс parse_mode в bot/client.py.
 
 ## Наступний крок
-немає
+Потенційно: перевірити роботу фото-flow (двокроковий режим морозилки) з новим tool use
+
+## Контекст
+agentic loop: stop_reason=tool_use → execute → tool_result → фінальна відповідь. bot/client.py: reply_text тепер з parse_mode=Markdown

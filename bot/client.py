@@ -480,7 +480,7 @@ async def _process(update: Update, user_id: int,
     await update.message.reply_chat_action("typing")
 
     reply = await chat(user_id, message, image_paths=image_paths)
-    await update.message.reply_text(reply)
+    await update.message.reply_text(reply, parse_mode="Markdown", disable_web_page_preview=True)
 
     # якщо Claude щойно зберіг рецепт — запам'ятовуємо що наступне фото = превью
     # якщо Claude щойно зберіг рецепт — наступне фото буде превью
