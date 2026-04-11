@@ -333,6 +333,7 @@ async def chat(user_id: int, user_message: str,
                 system=build_system(),
                 messages=optimized,
                 tools=TOOLS,
+                tool_choice={"type": "none"},  # фінальна відповідь — без повторних tool calls
             )
             u = response.usage
             total_input += u.input_tokens
