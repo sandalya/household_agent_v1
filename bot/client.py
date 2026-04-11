@@ -285,16 +285,18 @@ async def run_metro_search(message, ctx):
     await message.reply_text(f"🔍 Шукаю {len(items)} товарів у {store['name']}...")
     ean_index = {}
     if token:
-        lists = metro.get_lists(token)
+        lists = await asyncio.to_thread(metro.get_lists, token)
         if lists:
             ean_index = metro.build_ean_index(lists)
     try:
-        order = metro.build_order_from_shopping_list(items, ean_index=ean_index)
+        order = await asyncio.to_thread(
+            metro.build_order_from_shopping_list, items, None, ean_index
+        )
     except metro.MetroUnavailableError as e:
         await message.reply_text(f"⚠️ {e}\n\nСпробуй пізніше — як запрацює, просто напиши /metro знову.")
         return
     if token:
-        result = metro.fill_cart_from_order(token, order)
+        result = await asyncio.to_thread(metro.fill_cart_from_order, token, order)
         cart_msg = f"\n\n🛒 Додано в кошик: {result['added']} товарів"
         if result["skipped"]:
             cart_msg += f" (не вдалось: {result['skipped']})"
