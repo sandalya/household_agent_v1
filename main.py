@@ -4,8 +4,6 @@ import sys
 from pathlib import Path
 from telegram.ext import Application
 from core.config import TELEGRAM_TOKEN, LOGS_DIR
-from core.lock import acquire_lock, release_lock
-
 LOGS_DIR.mkdir(exist_ok=True)
 
 logging.basicConfig(
@@ -24,7 +22,6 @@ async def error_handler(update: object, context):
 
 
 def main():
-    acquire_lock()
     if not TELEGRAM_TOKEN:
         log.error("TELEGRAM_TOKEN не встановлено")
         sys.exit(1)
@@ -55,7 +52,7 @@ def main():
             timeout=20
         )
     finally:
-        release_lock()
+        pass
 
 
 if __name__ == "__main__":
