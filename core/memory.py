@@ -35,18 +35,22 @@ def get_shopping() -> list:
 
 def add_to_shopping(items: list):
     current = get_shopping()
-    lower = [i.lower() for i in current]
     for item in items:
         item = item.strip()
-        if item and item.lower() not in lower:
+        if item:
             current.append(item)
-            lower.append(item.lower())
     _save("shopping_list.json", current)
 
 def remove_from_shopping(items: list):
+    """Видаляє по одному входженню на кожен запит. Два однакові items видалять два входження."""
     current = get_shopping()
-    drop = [i.lower() for i in items]
-    _save("shopping_list.json", [i for i in current if i.lower() not in drop])
+    for item in items:
+        target = item.lower().strip()
+        for idx, existing in enumerate(current):
+            if existing.lower() == target:
+                current.pop(idx)
+                break  # тільки перше співпадіння на цей запит
+    _save("shopping_list.json", current)
 
 def clear_shopping():
     _save("shopping_list.json", [])

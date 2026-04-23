@@ -18,6 +18,21 @@ from core import voice
 from core import kitchen
 from core.recipe_fetcher import fetch_recipe_text, extract_urls
 
+async def _safe_reply(message, text: str, **kwargs):
+    """reply_text з фолбеком: якщо Markdown зламаний — шлемо plain text."""
+    from telegram.error import BadRequest
+    try:
+        return await message.reply_text(text, **kwargs)  # SAFE_REPLY_HELPER
+    except BadRequest as e:
+        if 'parse' in str(e).lower() or 'entities' in str(e).lower() or kwargs.get('parse_mode'):
+            kwargs.pop('parse_mode', None)
+            import logging
+            logging.getLogger('bot.client').warning(f'Markdown broken, retrying plain: {e}')
+            return await message.reply_text(text, **kwargs)  # SAFE_REPLY_HELPER
+        raise
+
+
+
 log = logging.getLogger("bot.client")
 
 buffers: dict[int, dict] = {}
@@ -61,7 +76,7 @@ async def _buffer(user_id: int, update: Update,
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not is_authorized(update.effective_user.id):
         return
-    await update.message.reply_text(
+    await _safe_reply(update.message, 
         "Привіт, я Мег 🏠\n\n"
         "Пиши що є, що закінчилось, що треба купити.\n"
         "Або скидай фото холодильника — розберусь що є.\n\n"
@@ -77,17 +92,17 @@ async def cmd_list(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
     items = memory.get_shopping()
     if not items:
-        await update.message.reply_text("Шоп-ліст порожній ✓")
+        await _safe_reply(update.message, "Шоп-ліст порожній ✓")
         return
     text = "🛒 *Треба купити:*\n" + "\n".join(f"• {i}" for i in items)
-    await update.message.reply_text(text, parse_mode="Markdown")
+    await _safe_reply(update.message, text, parse_mode="Markdown")
 
 async def cmd_freezer(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not is_authorized(update.effective_user.id):
         return
     items = memory.get_freezer()
     if not items:
-        await update.message.reply_text("Морозилка і пентрі порожні.")
+        await _safe_reply(update.message, "Морозилка і пентрі порожні.")
         return
 
     # фільтр по ящику: /freezer 2
@@ -99,7 +114,7 @@ async def cmd_freezer(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if filter_loc:
         items = [i for i in items if i.get("location", "").lower() == filter_loc]
         if not items:
-            await update.message.reply_text(f"В {filter_loc} нічого не знайдено.")
+            await _safe_reply(update.message, f"В {filter_loc} нічого не знайдено.")
             return
 
     by_loc: dict[str, list] = {}
@@ -178,20 +193,20 @@ async def cmd_freezer(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         lines.append(f"📦 *{loc}*")
         lines.extend(_group_items(loc_items))
         lines.append("")
-    await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+    await _safe_reply(update.message, "\n".join(lines), parse_mode="Markdown")
 
 async def cmd_inventory(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not is_authorized(update.effective_user.id):
         return
     inv = memory.get_inventory()
     if not inv:
-        await update.message.reply_text("Інвентар порожній.")
+        await _safe_reply(update.message, "Інвентар порожній.")
         return
     emoji = {"є": "✅", "мало": "⚠️", "нема": "❌"}
     lines = ["🏠 *Що є вдома:*\n"]
     for item, status in sorted(inv.items()):
         lines.append(f"{emoji.get(status,'•')} {item} — {status}")
-    await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+    await _safe_reply(update.message, "\n".join(lines), parse_mode="Markdown")
 
 async def cmd_recipes(update, ctx):
     if not is_authorized(update.effective_user.id):
@@ -199,7 +214,7 @@ async def cmd_recipes(update, ctx):
     data = kitchen.get_recipes()
     recipes = data.get('recipes', [])
     if not recipes:
-        await update.message.reply_text('Рецептів ще немає. Скидай посилання або фото рецепту — збережу.')
+        await _safe_reply(update.message, 'Рецептів ще немає. Скидай посилання або фото рецепту — збережу.')
         return
     lines = ["\U0001f4d6 *Збережені рецепти:*\n"]
     for i, r in enumerate(recipes, 1):
@@ -207,7 +222,7 @@ async def cmd_recipes(update, ctx):
         tags_str = f' _{tags}_' if tags else ''
         img = ' 📷' if r.get('image') else ''
         lines.append(f"{i}. *{r['name']}*{img}{tags_str}")
-    await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+    await _safe_reply(update.message, "\n".join(lines), parse_mode="Markdown")
 
 
 
@@ -216,7 +231,7 @@ async def cmd_metro(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
     items = memory.get_shopping()
     if not items:
-        await update.message.reply_text("🛒 Шоп-ліст порожній. Додай товари — і я знайду їх у Metro!")
+        await _safe_reply(update.message, "🛒 Шоп-ліст порожній. Додай товари — і я знайду їх у Metro!")
         return
     inventory = memory.get_inventory()
     suggestions = metro.suggest_missing_items(items, inventory)
@@ -233,7 +248,7 @@ async def cmd_metro(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             InlineKeyboardButton("✅ Додати вибране і шукати", callback_data="metro_confirm"),
             InlineKeyboardButton("⏭ Пропустити", callback_data="metro_skip"),
         ])
-        await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+        await _safe_reply(update.message, text, reply_markup=InlineKeyboardMarkup(buttons))
     else:
         await run_metro_search(update.message, ctx)
 
@@ -282,7 +297,7 @@ async def run_metro_search(message, ctx):
     items = memory.get_shopping()
     store = metro.get_store()
     token = metro.load_token()
-    await message.reply_text(f"🔍 Шукаю {len(items)} товарів у {store['name']}...")
+    await _safe_reply(message, f"🔍 Шукаю {len(items)} товарів у {store['name']}...")
     ean_index = {}
     if token:
         lists = await asyncio.to_thread(metro.get_lists, token)
@@ -293,7 +308,7 @@ async def run_metro_search(message, ctx):
             metro.build_order_from_shopping_list, items, None, ean_index
         )
     except metro.MetroUnavailableError as e:
-        await message.reply_text(f"⚠️ {e}\n\nСпробуй пізніше — як запрацює, просто напиши /metro знову.")
+        await _safe_reply(message, f"⚠️ {e}\n\nСпробуй пізніше — як запрацює, просто напиши /metro знову.")
         return
     if token:
         result = await asyncio.to_thread(metro.fill_cart_from_order, token, order)
@@ -304,36 +319,36 @@ async def run_metro_search(message, ctx):
     else:
         cart_msg = "\n\n⚠️ Токен не збережено. Надішли /metro\\_auth TOKEN"
     msg = metro.format_order_message(order, store["name"]) + cart_msg
-    await message.reply_text(msg, parse_mode="Markdown", disable_web_page_preview=True)
+    await _safe_reply(message, msg, parse_mode="Markdown", disable_web_page_preview=True)
 
 async def cmd_analyze_orders(update: Update, context: ContextTypes.DEFAULT_TYPE):
     token = metro.load_token()
     if not token:
-        await update.message.reply_text('❌ Токен Metro не знайдено. Використай /metro_auth TOKEN')
+        await _safe_reply(update.message, '❌ Токен Metro не знайдено. Використай /metro_auth TOKEN')
         return
-    await update.message.reply_text('⏳ Завантажую замовлення...')
+    await _safe_reply(update.message, '⏳ Завантажую замовлення...')
     orders = metro.get_all_orders(token)
     if not orders:
-        await update.message.reply_text('❌ Не вдалося завантажити замовлення. Перевір токен.')
+        await _safe_reply(update.message, '❌ Не вдалося завантажити замовлення. Перевір токен.')
         return
-    await update.message.reply_text(f'✅ Знайдено {len(orders)} замовлень. Аналізую...')
+    await _safe_reply(update.message, f'✅ Знайдено {len(orders)} замовлень. Аналізую...')
     patterns = metro.analyze_purchase_patterns(orders)
     msg = metro.format_patterns_message(patterns)
-    await update.message.reply_text(msg, parse_mode='Markdown')
+    await _safe_reply(update.message, msg, parse_mode='Markdown')
 
 async def cmd_metro_auth(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not is_authorized(update.effective_user.id):
         return
     args = ctx.args
     if not args:
-        await update.message.reply_text("Використання: /metro_auth ТОКЕН")
+        await _safe_reply(update.message, "Використання: /metro_auth ТОКЕН")
         return
     token = args[0].strip()
     user_id = update.effective_user.id
     metro.save_token(token, user_id=user_id)
     active = metro.get_active_user()
     nick_msg = f" ({active})" if active else ""
-    await update.message.reply_text(f"✅ Токен Metro збережено{nick_msg}! Тепер /metro буде заповнювати кошик.")
+    await _safe_reply(update.message, f"✅ Токен Metro збережено{nick_msg}! Тепер /metro буде заповнювати кошик.")
 
 
 async def cmd_metro_ksu(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -341,9 +356,9 @@ async def cmd_metro_ksu(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
     ok = metro.switch_user("ksu")
     if ok:
-        await update.message.reply_text("✅ Переключено на акаунт Ксюші 👩")
+        await _safe_reply(update.message, "✅ Переключено на акаунт Ксюші 👩")
     else:
-        await update.message.reply_text("❌ Токен Ксюші не збережено. Ксюша має написати /metro_auth ТОКЕН")
+        await _safe_reply(update.message, "❌ Токен Ксюші не збережено. Ксюша має написати /metro_auth ТОКЕН")
 
 
 async def cmd_metro_sashok(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -351,9 +366,9 @@ async def cmd_metro_sashok(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
     ok = metro.switch_user("sashok")
     if ok:
-        await update.message.reply_text("✅ Переключено на акаунт Сашка 👨")
+        await _safe_reply(update.message, "✅ Переключено на акаунт Сашка 👨")
     else:
-        await update.message.reply_text("❌ Токен Сашка не збережено. Напиши /metro_auth ТОКЕН")
+        await _safe_reply(update.message, "❌ Токен Сашка не збережено. Напиши /metro_auth ТОКЕН")
 
 
 async def cmd_metro_who(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -364,10 +379,10 @@ async def cmd_metro_who(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     saved = ", ".join(users.keys()) if users else "немає"
     if active:
         msg = f"🔑 Активний акаунт Metro: *{active}*\nЗбережені: {saved}"
-        await update.message.reply_text(msg, parse_mode="Markdown")
+        await _safe_reply(update.message, msg, parse_mode="Markdown")
     else:
         msg2 = f"⚠️ Активний акаунт не вибрано\nЗбережені: {saved}"
-        await update.message.reply_text(msg2)
+        await _safe_reply(update.message, msg2)
 
 
 
@@ -375,13 +390,13 @@ async def cmd_clear(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not is_authorized(update.effective_user.id):
         return
     memory.clear_shopping()
-    await update.message.reply_text("Шоп-ліст очищено ✓")
+    await _safe_reply(update.message, "Шоп-ліст очищено ✓")
 
 async def cmd_reset(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not is_authorized(update.effective_user.id):
         return
     memory.clear_session(update.effective_user.id)
-    await update.message.reply_text("Сесію скинуто.")
+    await _safe_reply(update.message, "Сесію скинуто.")
 
 
 # ── Повідомлення ──────────────────────────────────────────────────────────────
@@ -397,7 +412,7 @@ async def handle_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     # перевіряємо чи є URL — якщо так, завантажуємо сторінку
     urls = extract_urls(text)
     if urls:
-        await update.message.reply_text("🔗 Завантажую сторінку...")
+        await _safe_reply(update.message, "🔗 Завантажую сторінку...")
         fetched_parts = []
         for url in urls[:2]:  # максимум 2 посилання за раз
             page_text = fetch_recipe_text(url)
@@ -429,9 +444,9 @@ async def handle_photo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if recipe_name:
             ok = kitchen.save_recipe_image(recipe_name, tmp_path)
             if ok:
-                await update.message.reply_text(f"📷 Превью збережено для *{recipe_name}*", parse_mode="Markdown")
+                await _safe_reply(update.message, f"📷 Превью збережено для *{recipe_name}*", parse_mode="Markdown")
                 return
-        await update.message.reply_text("Не знайшла рецепт для цього фото.")
+        await _safe_reply(update.message, "Не знайшла рецепт для цього фото.")
         return
 
     await _buffer(user_id, update, ctx, text=caption, image_path=tmp_path)
@@ -442,7 +457,7 @@ async def handle_document(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
     doc = update.message.document
     if not (doc.mime_type and doc.mime_type.startswith("image/")):
-        await update.message.reply_text("Надсилай фото або зображення.")
+        await _safe_reply(update.message, "Надсилай фото або зображення.")
         return
     caption = (update.message.caption or "").strip()
     file = await ctx.bot.get_file(doc.file_id)
@@ -463,13 +478,13 @@ async def handle_voice(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     tmp_path = os.path.join(tempfile.gettempdir(), f"meg_voice_{user_id}_{v.file_unique_id}.ogg")
     await file.download_to_drive(tmp_path)
     log.info(f"Голосове завантажено: {tmp_path}")
-    await update.message.reply_text("🎙️ Слухаю...")
+    await _safe_reply(update.message, "🎙️ Слухаю...")
     text = voice.transcribe(tmp_path)
     if not text:
-        await update.message.reply_text("Не розібрала. Спробуй ще раз або напиши текстом.")
+        await _safe_reply(update.message, "Не розібрала. Спробуй ще раз або напиши текстом.")
         return
     log.info(f"Голос → текст: {text}")
-    await update.message.reply_text(f'🎙️ _"{text}"_', parse_mode='Markdown')
+    await _safe_reply(update.message, f'🎙️ _"{text}"_', parse_mode='Markdown')
     await _buffer(user_id, update, ctx, text=text)
 
 
@@ -482,7 +497,7 @@ async def _process(update: Update, user_id: int,
     await update.message.reply_chat_action("typing")
 
     reply = await chat(user_id, message, image_paths=image_paths)
-    await update.message.reply_text(reply, parse_mode="Markdown", disable_web_page_preview=True)
+    await _safe_reply(update.message, reply, parse_mode="Markdown", disable_web_page_preview=True)
 
     # якщо Claude щойно зберіг рецепт — запам'ятовуємо що наступне фото = превью
     # якщо Claude щойно зберіг рецепт — наступне фото буде превью
@@ -508,7 +523,7 @@ async def post_init(app):
 
 async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = token_tracker.format_stats(days=7)
-    await update.message.reply_text(text)
+    await _safe_reply(update.message, text)
 
 def setup_handlers(app: Application):
     app.add_handler(CommandHandler("start",     cmd_start))
