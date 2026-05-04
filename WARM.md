@@ -1,6 +1,6 @@
 ---
 project: household_agent
-updated: 2026-04-23
+updated: 2026-05-04
 ---
 
 # WARM — household_agent (Меггі)
@@ -65,7 +65,7 @@ status: active
 
 Системний промт розділений на статичну і динамічну частини (статична кешується API). Rolling session summary — замість передачі всієї історії діалогу передається компактне summary попередньої частини. Команда `/stats` показує статистику витрат токенів.
 
-## Багфікс-сесія (нещодавня)
+## Багфікс-сесія (завершена)
 
 ```yaml
 last_touched: 2026-04-23
@@ -74,6 +74,16 @@ status: done
 ```
 
 Серія виправлень у попередній сесії: (1) бот галюцинував підтвердження додавання у список покупок без фактичного виклику tool; (2) Telegram API повертав 400 на деяких повідомленнях (довжина/форматування); (3) дедуплікація елементів списку працювала некоректно, накопичувались дублікати. Всі три — вирішено.
+
+## Disk & repository state
+
+```yaml
+last_touched: 2026-05-04
+tags: [infrastructure, cleanup, git]
+status: active
+```
+
+**2026-05-04 cleanup:** gallery-dl/ видалено з git історії через `git filter-repo` (240M→612K, 400x reduction) і фізично (311M). Total economy: 551M. venv 3G норма (PTB/openai/ML deps). Working tree чистий, production-safe. gallery-dl/ в .gitignore для майбутніх data-сесій.
 
 ## Ключові рішення
 

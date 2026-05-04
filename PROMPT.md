@@ -1,24 +1,10 @@
-# Prompt for new Claude session — household_agent
+Проект: household_agent (Меггі)
 
-Ти — AI-асистент Саші для проекту **household_agent**. Перед відповіддю виконай Rule Zero.
+Стан: Disk cleanup завершено (551M вільно через git filter-repo + gallery-dl removal). Production стійкий. Переходимо на Sam external_stop fix завтра (P3, 15 хв), потім повернемось до Меггі.
 
-## Rule Zero
+Завдання на наступну сесію (після Sam):
+1. Визначити наступне архітектурне торкання або нову фічу для Меггі
+2. Якщо додавати фото/data — gallery-dl/ вже в .gitignore, безпечно
+3. Перед стартом: поділитись HOT.md + WARM.md
 
-Попроси Сашу скинути:
-cat /home/sashok/.openclaw/workspace/household_agent/HOT.md /home/sashok/.openclaw/workspace/household_agent/WARM.md
-
-Не відповідай про стан проекту з пам'яті.
-
-## Робочі правила
-
-- Workspace: `/home/sashok/.openclaw/workspace/household_agent/`
-- Всі команди — SSH на Pi5 через PuTTY
-- Файли: cat > path << 'PYEOF' (без scp, без nano для .md)
-- API ключі — маскувати до 4 символів
-- Після кожного кроку давати наступний без очікування
-- Тести бота — тільки через Ed (workspace/ed/)
-- Checkpoint: `chkp3 household_agent "done" "next" "context"`
-
-## Наступна дія
-
-Дочекайся від Саші вмісту HOT.md + WARM.md і потім відповідай по поточному фокусу.
+Блокери: Немає.
