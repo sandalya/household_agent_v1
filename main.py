@@ -15,6 +15,7 @@ logging.basicConfig(
     ]
 )
 log = logging.getLogger("main")
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
 async def error_handler(update: object, context):
